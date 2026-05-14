@@ -60,7 +60,7 @@ sudo install -m 644 1714-1-0xB.bin /lib/firmware/ti/audio/tas2783/1714-1-B.bin
 
 ### Step 2
 
-No ALSA UCM profile exists for this card. Without config, WirePlumber sets the profile to `off` and no audio sinks appear. Save `firmware-HN7306EAC/51-strix-halo-audio.conf` into `~/.config/wireplumber/wireplumber.conf.d/51-strix-halo-audio.conf`
+No ALSA UCM profile exists for this card. Without config, WirePlumber sets the profile to `off` and no audio sinks appear. Save `config/51-strix-halo-audio.conf` into `~/.config/wireplumber/wireplumber.conf.d/51-strix-halo-audio.conf`
 
 
 **Note:** The PCI BDF `0000_c4_00.5` may differ on other units. Check `pactl list short cards | grep sdw`.

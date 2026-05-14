@@ -7,18 +7,23 @@
 # Usage:
 #   ./extract-firmware.sh SmartAMP_TI_DCH_TexasInstruments_Z_V6.3.1.15_47519.exe
 #
+# Per-system identifiers (installer & firmware filenames + SHA-256s) live in
+# systems/<MODEL>.conf. Override the default with: SYSTEM_CONF=path ./extract-firmware.sh ...
+#
 # Download the installer from:
 #   https://www.asus.com/laptops/for-creators/proart/proart-px13-hn7306/helpdesk_download?model2Name=HN7306EA
-#   Look for SmartAMP under Utilities → Windows 11 64-bit.
+#   Look for TI Smart Amplifier Driver for Speakers under Driver & Tools → Windows 11 64-bit.
 
 set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SYSTEM_CONF="${SYSTEM_CONF:-$SCRIPT_DIR/systems/HN7306EAC.conf}"
 
 EXE="${1:?Usage: $0 <SmartAMP installer .exe>}"
 OUTDIR="firmware"
 
-EXPECTED_EXE_SHA256="8728835795be467d39c721b6245e6e038d44fcbf0d0e49718ef45cb44eb8a3ce"
-EXPECTED_0x8_SHA256="9a105de50978fc3250062d66bea6b77f3aaabaf85280739be28ff1ed3ae535ca"
-EXPECTED_0xB_SHA256="a975dc7e2340cb5c97259d5e8c3d7e447b5a0af1a91528c058c9fda0adeb74c1"
+# shellcheck source=/dev/null
+source "$SYSTEM_CONF"
 
 # Check dependencies
 for cmd in wrestool 7z sha256sum; do
@@ -28,8 +33,8 @@ done
 # Verify installer hash
 echo "Verifying installer checksum..."
 actual_sha256=$(sha256sum "$EXE" | awk '{print $1}')
-if [ "$actual_sha256" != "$EXPECTED_EXE_SHA256" ]; then
-    echo "Warning: installer SHA-256 mismatch (expected $EXPECTED_EXE_SHA256, got $actual_sha256)" >&2
+if [ "$actual_sha256" != "$INSTALLER_SHA256" ]; then
+    echo "Warning: installer SHA-256 mismatch (expected $INSTALLER_SHA256, got $actual_sha256)" >&2
     echo "Proceeding anyway — firmware hashes will be checked after extraction." >&2
 fi
 
@@ -41,20 +46,20 @@ echo "Extracting firmware archive from installer..."
 wrestool -x --raw --type=ZIP --name=103 "$EXE" > "$TMPDIR/firmwares.7z" 2>/dev/null
 
 # Step 2: Extract the firmware blobs from the 7z archive
-7z x "$TMPDIR/firmwares.7z" -o"$TMPDIR/out" "Firmwares/1714-1-0x8.bin" "Firmwares/1714-1-0xB.bin" -y >/dev/null 2>&1
+7z x "$TMPDIR/firmwares.7z" -o"$TMPDIR/out" "Firmwares/$FIRMWARE_8_NAME" "Firmwares/$FIRMWARE_B_NAME" -y >/dev/null 2>&1
 
 # Verify firmware hashes
 echo "Verifying firmware checksums..."
-actual_0x8=$(sha256sum "$TMPDIR/out/Firmwares/1714-1-0x8.bin" | awk '{print $1}')
-actual_0xB=$(sha256sum "$TMPDIR/out/Firmwares/1714-1-0xB.bin" | awk '{print $1}')
+actual_8=$(sha256sum "$TMPDIR/out/Firmwares/$FIRMWARE_8_NAME" | awk '{print $1}')
+actual_B=$(sha256sum "$TMPDIR/out/Firmwares/$FIRMWARE_B_NAME" | awk '{print $1}')
 
 fail=0
-if [ "$actual_0x8" != "$EXPECTED_0x8_SHA256" ]; then
-    echo "FAIL: 1714-1-0x8.bin hash mismatch" >&2
+if [ "$actual_8" != "$FIRMWARE_8_SHA256" ]; then
+    echo "FAIL: $FIRMWARE_8_NAME hash mismatch" >&2
     fail=1
 fi
-if [ "$actual_0xB" != "$EXPECTED_0xB_SHA256" ]; then
-    echo "FAIL: 1714-1-0xB.bin hash mismatch" >&2
+if [ "$actual_B" != "$FIRMWARE_B_SHA256" ]; then
+    echo "FAIL: $FIRMWARE_B_NAME hash mismatch" >&2
     fail=1
 fi
 if [ "$fail" -eq 1 ]; then
@@ -64,16 +69,20 @@ fi
 
 # Copy to output
 mkdir -p "$OUTDIR"
-cp "$TMPDIR/out/Firmwares/1714-1-0x8.bin" "$OUTDIR/"
-cp "$TMPDIR/out/Firmwares/1714-1-0xB.bin" "$OUTDIR/"
+cp "$TMPDIR/out/Firmwares/$FIRMWARE_8_NAME" "$OUTDIR/"
+cp "$TMPDIR/out/Firmwares/$FIRMWARE_B_NAME" "$OUTDIR/"
+
+# Kernel-side names drop the "0x" prefix (1714-1-0x8.bin -> 1714-1-8.bin)
+install_8="${FIRMWARE_8_NAME/0x/}"
+install_B="${FIRMWARE_B_NAME/0x/}"
 
 echo "OK — firmware extracted to $OUTDIR/"
-echo "  $OUTDIR/1714-1-0x8.bin  ($(wc -c < "$OUTDIR/1714-1-0x8.bin") bytes)"
-echo "  $OUTDIR/1714-1-0xB.bin  ($(wc -c < "$OUTDIR/1714-1-0xB.bin") bytes)"
+echo "  $OUTDIR/$FIRMWARE_8_NAME  ($(wc -c < "$OUTDIR/$FIRMWARE_8_NAME") bytes)"
+echo "  $OUTDIR/$FIRMWARE_B_NAME  ($(wc -c < "$OUTDIR/$FIRMWARE_B_NAME") bytes)"
 echo ""
 echo "Install with:"
-echo "  sudo install -m 644 $OUTDIR/1714-1-0x8.bin /lib/firmware/1714-1-8.bin"
-echo "  sudo install -m 644 $OUTDIR/1714-1-0xB.bin /lib/firmware/1714-1-B.bin"
+echo "  sudo install -m 644 $OUTDIR/$FIRMWARE_8_NAME /lib/firmware/$install_8"
+echo "  sudo install -m 644 $OUTDIR/$FIRMWARE_B_NAME /lib/firmware/$install_B"
 echo "  sudo install -d -m 755 /lib/firmware/ti/audio/tas2783"
-echo "  sudo install -m 644 $OUTDIR/1714-1-0x8.bin /lib/firmware/ti/audio/tas2783/1714-1-8.bin"
-echo "  sudo install -m 644 $OUTDIR/1714-1-0xB.bin /lib/firmware/ti/audio/tas2783/1714-1-B.bin"
+echo "  sudo install -m 644 $OUTDIR/$FIRMWARE_8_NAME /lib/firmware/ti/audio/tas2783/$install_8"
+echo "  sudo install -m 644 $OUTDIR/$FIRMWARE_B_NAME /lib/firmware/ti/audio/tas2783/$install_B"
