@@ -8,6 +8,16 @@ The internal speakers (TAS2783 SmartAmp, SoundWire) are silent out of the box on
 2. **no UCM exists for this card**, so the SoundWire device gets no usable audio profile
 3. **SoundWire bus corruption workaround** - a kernel issue where the SmartAmp IV-sense capture stream fails to configure (`-22 EINVAL`), corrupting the entire SoundWire bus
 
+## ASUS Driver Downloads
+
+The firmware extraction documented here uses the SmartAMP driver from the ASUS support page:
+
+https://www.asus.com/laptops/for-creators/proart/proart-px13-hn7306/helpdesk_download?model2Name=HN7306EA
+
+In my case I clicked *HN7306EAC* in the drop down under Driver & Tools.
+
+Look for *TI Smart Amplifier Driver for Speakers* under that. The file used in this repo was `SmartAMP_TI_DCH_TexasInstruments_Z_V6.3.1.15_47519.exe` (SHA-256: `8728835795be467d39c721b6245e6e038d44fcbf0d0e49718ef45cb44eb8a3ce`).
+
 ### Prerequisites
 
 - **Kernel 7.0+** - an initial driver landed mainline 2026-03-16. On 6.x kernels, only a capture-only `acp-pdm-mach` device appears, not the SoundWire card.
