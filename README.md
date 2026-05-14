@@ -91,7 +91,7 @@ sudo install -m 644 ucm2/conf.d/amd-soundwire/HiFi.conf /usr/share/alsa/ucm2/con
 
 If you need to test the UCM config manually, use `alsaucm -c amd-soundwire` or verify via `pactl list cards`.
 
-## Step 3
+### Step 3
 
 A minimal WirePlumber rule prevents the SoundWire bus from suspending (which causes desync and audio dropouts):
 
@@ -112,6 +112,7 @@ sed -i '/platform-amd_sdw/d' ~/.local/state/wireplumber/default-routes
 The PCI BDF `0000_c4_00.5` may differ on other units check with `pactl list short cards | grep sdw`.
 
 ### Step 4
+
 SmartAmp's IV-sense capture stream (`SDW1-PIN4-CAPTURE-SmartAmp`) fails `Program transport params` during initial card activation. This corrupts the entire SoundWire bus and blocks all audio. The UCM config avoids defining this PCM, but the bus corruption still happens at the SoundWire transport layer during initial profile activation.
 
 To fix,  ycle the card profile `off` -> `HiFi (Mic, Speaker)` after PipeWire starts, which resets the bus.
