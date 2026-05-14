@@ -105,8 +105,8 @@ cp config/51-strix-halo-audio.conf ~/.config/wireplumber/wireplumber.conf.d/
 Also clear WirePlumber's saved profile state so it doesn't restore `pro-audio` on next boot:
 
 ```fish
-sed -i '/alsa_card.pci-0000_c4_00.5-platform-amd_sdw/d' ~/.local/state/wireplumber/default-profile
-sed -i '/alsa_card.pci-0000_c4_00.5-platform-amd_sdw/d' ~/.local/state/wireplumber/default-routes
+sed -i '/platform-amd_sdw/d' ~/.local/state/wireplumber/default-profile
+sed -i '/platform-amd_sdw/d' ~/.local/state/wireplumber/default-routes
 ```
 
 The PCI BDF `0000_c4_00.5` may differ on other units check with `pactl list short cards | grep sdw`.

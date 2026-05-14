@@ -7,8 +7,14 @@ Requires=wireplumber.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStartPre=/usr/bin/sleep 3
-ExecStart=/bin/sh -c 'pactl set-card-profile alsa_card.pci-0000_c4_00.5-platform-amd_sdw off && sleep 2 && pactl set-card-profile "alsa_card.pci-0000_c4_00.5-platform-amd_sdw" "HiFi (Mic, Speaker)"'
-ExecStop=/usr/bin/pactl set-card-profile alsa_card.pci-0000_c4_00.5-platform-amd_sdw off
+ExecStart=/bin/sh -c '\
+  CARD=$(pactl list short cards | grep -o "alsa_card.pci-[^ ]*-platform-amd_sdw") && \
+  pactl set-card-profile "$CARD" off && \
+  sleep 2 && \
+  pactl set-card-profile "$CARD" "HiFi (Mic, Speaker)"'
+ExecStop=/bin/sh -c '\
+  CARD=$(pactl list short cards | grep -o "alsa_card.pci-[^ ]*-platform-amd_sdw") && \
+  pactl set-card-profile "$CARD" off'
 
 [Install]
 WantedBy=default.target
