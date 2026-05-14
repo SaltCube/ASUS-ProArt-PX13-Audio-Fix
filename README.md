@@ -100,6 +100,15 @@ Enable with `systemctl --user daemon-reload && systemctl --user enable fix-sdw-s
 | Internal Microphone | pro-input-4 | PDM mic array |
 | *(hidden)* | pro-input-3 | SmartAmp IV-sense |
 
+### Silence Beep on Shutdown
+
+The laptop seems to have a piezo buzzer that beeps during shutdown, a ~1800Hz tone lasting several seconds until power fully cuts. This is the `pcspkr` kernel module, not the TAS2783 speakers. Blacklist it:
+
+```fish
+sudo sh -c 'echo "blacklist pcspkr" > /etc/modprobe.d/nobeep.conf'
+sudo rmmod pcspkr  # kill it immediately without rebooting
+```
+
 ### Remaining Quirks
 
 - No auto-switch on headphone plug/unplug
