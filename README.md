@@ -24,14 +24,23 @@ Look for *TI Smart Amplifier Driver for Speakers* under that. The file used in t
 - **CachyOS** ships `linux-cachyos` 7.0.x from the `cachyos-znver4` repo, which works.
 
 ### Step 1
-The ASUS Windows driver (`SmartAMP_TI_DCH_TexasInstruments_Z_V6.3.1.15_47519.exe`, 4.3 MB) is a nested installer. As far as I can tell, the firmware is buried inside a 7z archive embedded at an offset within the Inno Setup payload's `AsusBusinessIntelligenceCPPLib.dll`. 
 
-The extraction process was:
+The firmware must be extracted from the ASUS Windows driver, download link above.
 
-1. `7z x smartamp.exe`
-2. `wrestool -x --raw --type=EXE --name=102` on the `.rsrc` EXE 
-3. `innoextract` (needs `innoextract-git` from AUR, stock 1.9 is too old for Inno 6.1.0)
-4. `7z` / `binwalk` on `AsusBusinessIntelligenceCPPLib.dll` at the right offset
+The ASUS Windows driver (`SmartAMP_TI_DCH_TexasInstruments_Z_V6.3.1.15_47519.exe`, 4.3 MB) is a nested installer.
+
+**Automated extraction, script courtesy of Claude Opus 4.6** - requires `wrestool` (icoutils) and `7z` (p7zip):
+
+```fish
+chmod +x extract-firmware.sh && \
+./extract-firmware.sh SmartAMP_TI_DCH_TexasInstruments_Z_V6.3.1.15_47519.exe
+```
+
+The script extracts the firmware, verifies SHA-256 checksums, and prints install commands. Under the hood, the installer is a nested PE with a 7z archive embedded as a resource:
+
+1. `wrestool -x --raw --type=ZIP --name=103` on the installer: extracts a 7z archive containing a `Firmwares/` directory with calibration blobs for every supported ASUS model
+2. `7z x` on that archive: extracts `1714-1-0x8.bin` and `1714-1-0xB.bin` (the blobs for subsystem ID `0x1714` / HN7306EAC)
+
 
 The two files needed:
 | Source filename | Size | SHA-256 |
