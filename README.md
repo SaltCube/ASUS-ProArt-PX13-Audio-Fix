@@ -5,7 +5,7 @@ Configs, fixes, bug workarounds for audio on linux (CachyOS specifically) on the
 The internal speakers (TAS2783 SmartAmp, SoundWire) are silent out of the box on Linux. Three things are missing:
 
 1. **Firmware blobs** don't ship for linux by default for ASUS subsystem ID `0x1714`
-2. **no UCM exists for this card**, so the SoundWire device gets no usable audio profile
+2. **UCM config** The system `amd-soundwire` UCM config recognizes the RT721 headset codec but fails to create Speaker or Mic devices because the kernel's CardComponents string (`cfg-amp:2 hs:rt721`) doesn't contain `spk:` and `mic:` entries
 3. **SoundWire bus corruption workaround** - a kernel issue where the SmartAmp IV-sense capture stream fails to configure (`-22 EINVAL`), corrupting the entire SoundWire bus
 
 ## ASUS Driver Downloads
@@ -60,35 +60,70 @@ sudo install -m 644 1714-1-0xB.bin /lib/firmware/ti/audio/tas2783/1714-1-B.bin
 
 ### Step 2
 
-No ALSA UCM profile exists for this card. Without config, WirePlumber sets the profile to `off` and no audio sinks appear. Save `config/51-strix-halo-audio.conf` into `~/.config/wireplumber/wireplumber.conf.d/51-strix-halo-audio.conf`
+The system `amd-soundwire` UCM config (from `alsa-ucm-conf`) only creates Headphone and Headset devices for this card. It fails to create Speaker and Mic devices because the AMD ACP70 kernel driver does not report `spk:` or `mic:` in the card's `CardComponents` string.
 
+This repo provides a replacement UCM config ([`ucm2/conf.d/amd-soundwire/`](ucm2/conf.d/amd-soundwire/)) that hardcodes all four devices:
 
-**Note:** The PCI BDF `0000_c4_00.5` may differ on other units. Check `pactl list short cards | grep sdw`.
+| UCM Device | ALSA PCM | Hardware | Jack Detection |
+|---|---|---|---|
+| Speaker | `hw:amdsoundwire,2` | TAS2783 SmartAmp ([no stereo yet](#Stereo-channel-mapping-issue)) | always on |
+| Headphones | `hw:amdsoundwire,0` | RT721 SDCA headphone jack | `Headphone Jack` |
+| Mic | `hw:amdsoundwire,4` | ACP PDM dual-mic array | always on |
+| Headset | `hw:amdsoundwire,1` | RT721 SDCA headset mic | `Headset Mic Jack` |
 
-### Step 3
+Back up the original first if you want to be safe:
 
-This is kind of a hack/bandaid. There seems to be a kernel issue where the SmartAmp's IV-sense capture stream (`SDW1-PIN4-CAPTURE-SmartAmp`) fails `Program transport params` with `-22` during PipeWire startup which corrupts the soundwire bus.
-
-We can cycle the card profile `off` -> `pro-audio` after PipeWire starts, which seems to reset the bus. This is automated with a systemd user service at `~/.config/systemd/user/fix-sdw-speakers.service`:
-
-```ini
-[Unit]
-Description=Reset SoundWire bus for TAS2783 speakers
-After=wireplumber.service
-Requires=wireplumber.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStartPre=/usr/bin/sleep 3
-ExecStart=/bin/sh -c 'pactl set-card-profile alsa_card.pci-0000_c4_00.5-platform-amd_sdw off && sleep 2 && pactl set-card-profile alsa_card.pci-0000_c4_00.5-platform-amd_sdw pro-audio'
-ExecStop=/usr/bin/pactl set-card-profile alsa_card.pci-0000_c4_00.5-platform-amd_sdw off
-
-[Install]
-WantedBy=default.target
+```fish
+sudo mv /usr/share/alsa/ucm2/conf.d/amd-soundwire/amd-soundwire.conf /usr/share/alsa/ucm2/conf.d/amd-soundwire/amd-soundwire.conf.bak
 ```
 
-Enable with `systemctl --user daemon-reload && systemctl --user enable fix-sdw-speakers.service`.
+Install:
+
+```fish
+sudo install -m 644 ucm2/conf.d/amd-soundwire/amd-soundwire.conf /usr/share/alsa/ucm2/conf.d/amd-soundwire/
+sudo install -m 644 ucm2/conf.d/amd-soundwire/HiFi.conf /usr/share/alsa/ucm2/conf.d/amd-soundwire/
+```
+
+**Proper UCM fix should:**
+- Load HiFi profile with named devices instead of generic "Pro" nodes
+- Jack detection - headphone/headset nodes are hidden when unplugged
+- Auto-switch - WirePlumber automatically switches output when headphones are plugged in
+
+If you need to test the UCM config manually, use `alsaucm -c amd-soundwire` or verify via `pactl list cards`.
+
+## Step 3
+
+A minimal WirePlumber rule prevents the SoundWire bus from suspending (which causes desync and audio dropouts):
+
+```fish
+mkdir -p ~/.config/wireplumber/wireplumber.conf.d
+cp config/51-strix-halo-audio.conf ~/.config/wireplumber/wireplumber.conf.d/
+```
+
+**Note**: It seems the `pro-audio` profile still appears as a selectable option in PipeWire/Plasma even with the UCM config installed. Selecting this likely bypasses the UCM device definitions and reverts to raw ALSA nodes.
+
+Also clear WirePlumber's saved profile state so it doesn't restore `pro-audio` on next boot:
+
+```fish
+sed -i '/alsa_card.pci-0000_c4_00.5-platform-amd_sdw/d' ~/.local/state/wireplumber/default-profile
+sed -i '/alsa_card.pci-0000_c4_00.5-platform-amd_sdw/d' ~/.local/state/wireplumber/default-routes
+```
+
+The PCI BDF `0000_c4_00.5` may differ on other units check with `pactl list short cards | grep sdw`.
+
+### Step 4
+SmartAmp's IV-sense capture stream (`SDW1-PIN4-CAPTURE-SmartAmp`) fails `Program transport params` during initial card activation. This corrupts the entire SoundWire bus and blocks all audio. The UCM config avoids defining this PCM, but the bus corruption still happens at the SoundWire transport layer during initial profile activation.
+
+To fix,  ycle the card profile `off` -> `HiFi (Mic, Speaker)` after PipeWire starts, which resets the bus.
+
+Copy [`config/fix-sdw-speakers.service`](config/fix-sdw-speakers.service) and enable it:
+
+```fish
+mkdir -p ~/.config/systemd/user
+cp config/fix-sdw-speakers.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable fix-sdw-speakers.service
+```
 
 ### Device Map
 
@@ -115,3 +150,60 @@ sudo rmmod pcspkr  # kill it immediately without rebooting
 - Issues after suspend - may need `pactl set-card-profile ... off; sleep 1; pactl set-card-profile ... pro-audio`
 - The profile cycle workaround should become unnecessary once the kerne/firmware/drivers mature upstream
 - 16-bit / 48kHz output only - the TAS2783 supports up to 32-bit/96kHz per spec, but the AMD ACP70 SoundWire ALSA driver (`sound/soc/amd`) is stuck at 48kHz for SmartAmp playback.
+
+### Bugs?
+This may be intended behavior driver side they indicate the amps are supposed to only select and play their respective audio stream.
+#### Stereo channel mapping issue
+
+Both physical speakers produce audio, but there is no stereo separation. Testing with `speaker-test -c 2 -t sine -f 440 -s <channel>` shows that both speakers respond to the front-left signal; the front-right signal may be silent or indistinguishable. PipeWire routes FL and FR as distinct streams to the ALSA boundary (`output_FL → playback_FL`, `output_FR → playback_FR` confirmed via `wpctl status`), so the problem is below ALSA.
+
+The kernel exposes no channel-routing controls for the TAS2783 path. The full mixer surface is:
+
+- `Left Spk Switch` / `Right Spk Switch` - chip 1 mute gates
+- `Left Spk2 Switch` / `Right Spk2 Switch` - chip 2 mute gates
+- `tas2783-1 Amp Volume` / `tas2783-1 Speaker Volume` - chip 1 gain
+- `tas2783-2 Amp Volume` / `tas2783-2 Speaker Volume` - chip 2 gain
+
+No source-select, slot-select, channel-select, or routing enums exist. With any of the four switches off, at least one physical speaker goes silent, so UCM enables all four, but this does not fix stereo.
+
+The two TAS2783 chips (SoundWire unique IDs `0x8` and `0xb`) share a single playback DAI (`multicodec-2`). Which kernel widget name (`Spk` vs `Spk2`, `Left` vs `Right`) maps to which physical speaker has not been determined yet.
+
+Possible root causes:
+
+1. `asoc_sdw_hw_params()` in `soc_sdw_utils.c` uses `step = 0` (identical data to both amps) without per-codec channel differentiation, but this seems like intended behavior
+2. SDCA per-chip channel-select register (IT21 input selector) is never written by the Linux TAS2783 driver - the Windows driver likely does this during init
+
+Both speakers produce audio, but there's no stereo separation.
+
+#### IV-sense capture stream corruption
+
+`SDW1-PIN4-CAPTURE-SmartAmp` fails `snd_soc_link_prepare()` with `-EINVAL` on every boot. This corrupts the SoundWire bus state, blocking all audio until the card profile is cycled. The UCM config intentionally omits PCM 3 (IV-sense) to avoid triggering this from the profile level, but the corruption occurs at the SoundWire transport layer during initial card activation regardless.
+
+This is worked around by the profile-cycle systemd service (Step 4). The workaround becomes unnecessary once this is fixed upstream.
+
+#### SoundWire bus dies after suspend/resume
+
+After system suspend (sleep/lid close), the SoundWire bus fails to re-initialize.
+The kernel logs show:
+
+```
+sdw_deprepare_stream: inconsistent state state 1
+rt721-sdca: SDW_SCP_BUSCLOCK_SCALE register write failed
+soundwire sdw-master-0-1: Program params failed: -61
+SDW1-PIN1-PLAYBACK-SmartAmp: ASoC error (-61): at snd_soc_link_prepare()
+```
+
+Error `-61` is `ENODATA`: the bus master cannot communicate with any SoundWire device (RT721 or TAS2783). The stream state machine is stuck in an inconsistent state and the bus clock cannot be reprogrammed. This is different from the boot-time IV-sense issue (which is `-22 EINVAL` on `PIN4-CAPTURE` and recoverable with a profile cycle).
+
+No userspace workaround exists:
+- Profile cycling (`pactl set-card-profile ... off / on`) does not help
+- Restarting PipeWire/WirePlumber does not help (and causes a 30s hang + loss of all audio devices in GUI)
+- Module unload fails (`snd_soc_tas2783_sdw` is in use due to stuck stream references)
+
+The `session.suspend-timeout-seconds = 0` WirePlumber rule (Step 3) prevents PipeWire from voluntarily suspending the speaker stream, but cannot prevent system-wide suspend. This may implicate the AMD ACP70 SoundWire bus master's suspend/resume path.
+
+#### CardComponents Missing
+
+The AMD ACP70 SoundWire machine driver (`snd_acp_sdw_legacy_mach`) reports `CardComponents` as `cfg-amp:2 hs:rt721` - missing `spk:` (for TAS2783 speakers) and `mic:` (for the ACP DMIC).
+This prevents the upstream `amd-soundwire` UCM config from auto-creating Speaker and Mic devices.
+This is worked around by the custom UCM config (Step 2) which hardcodes all device definitions.

@@ -7,7 +7,7 @@ Requires=wireplumber.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStartPre=/usr/bin/sleep 3
-ExecStart=/bin/sh -c 'pactl set-card-profile alsa_card.pci-0000_c4_00.5-platform-amd_sdw off && sleep 2 && pactl set-card-profile alsa_card.pci-0000_c4_00.5-platform-amd_sdw pro-audio'
+ExecStart=/bin/sh -c 'pactl set-card-profile alsa_card.pci-0000_c4_00.5-platform-amd_sdw off && sleep 2 && pactl set-card-profile "alsa_card.pci-0000_c4_00.5-platform-amd_sdw" "HiFi (Mic, Speaker)"'
 ExecStop=/usr/bin/pactl set-card-profile alsa_card.pci-0000_c4_00.5-platform-amd_sdw off
 
 [Install]
