@@ -96,3 +96,4 @@ Enable with `systemctl --user daemon-reload && systemctl --user enable fix-sdw-s
 - No auto-switch on headphone plug/unplug
 - Issues after suspend - may need `pactl set-card-profile ... off; sleep 1; pactl set-card-profile ... pro-audio`
 - The profile cycle workaround should become unnecessary once the kerne/firmware/drivers mature upstream
+- 16-bit / 48kHz output only - the TAS2783 supports up to 32-bit/96kHz per spec, but the AMD ACP70 SoundWire ALSA driver (`sound/soc/amd`) is stuck at 48kHz for SmartAmp playback.
