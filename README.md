@@ -51,74 +51,8 @@ sudo install -m 644 1714-1-0xB.bin /lib/firmware/ti/audio/tas2783/1714-1-B.bin
 
 ### Step 2
 
-No ALSA UCM profile exists for this card. Without config, WirePlumber sets the profile to `off` and no audio sinks appear. Save as `~/.config/wireplumber/wireplumber.conf.d/51-strix-halo-audio.conf`:
+No ALSA UCM profile exists for this card. Without config, WirePlumber sets the profile to `off` and no audio sinks appear. Save `firmware-HN7306EAC/51-strix-halo-audio.conf` into `~/.config/wireplumber/wireplumber.conf.d/51-strix-halo-audio.conf`
 
-```
-monitor.alsa.rules = [
-  {
-    matches = [
-      { device.name = "alsa_card.pci-0000_c4_00.5-platform-amd_sdw" }
-    ]
-    actions = {
-      update-props = {
-        device.profile = "pro-audio"
-      }
-    }
-  }
-  {
-    matches = [
-      { node.name = "alsa_output.pci-0000_c4_00.5-platform-amd_sdw.pro-output-2" }
-    ]
-    actions = {
-      update-props = {
-        session.suspend-timeout-seconds = 0
-        node.description = "Internal Speakers (TAS2783)"
-        audio.position = [ FL, FR ]
-      }
-    }
-  }
-  {
-    matches = [
-      { node.name = "alsa_output.pci-0000_c4_00.5-platform-amd_sdw.pro-output-0" }
-    ]
-    actions = {
-      update-props = {
-        node.description = "Audio Jack (3.5mm)"
-      }
-    }
-  }
-  {
-    matches = [
-      { node.name = "alsa_input.pci-0000_c4_00.5-platform-amd_sdw.pro-input-1" }
-    ]
-    actions = {
-      update-props = {
-        node.description = "Audio Jack (3.5mm)"
-      }
-    }
-  }
-  {
-    matches = [
-      { node.name = "alsa_input.pci-0000_c4_00.5-platform-amd_sdw.pro-input-4" }
-    ]
-    actions = {
-      update-props = {
-        node.description = "Internal Microphone"
-      }
-    }
-  }
-  {
-    matches = [
-      { node.name = "~alsa_input.pci-0000_c4_00.5-platform-amd_sdw.pro-input-3" }
-    ]
-    actions = {
-      update-props = {
-        node.disabled = true
-      }
-    }
-  }
-]
-```
 
 **Note:** The PCI BDF `0000_c4_00.5` may differ on other units. Check `pactl list short cards | grep sdw`.
 
