@@ -82,7 +82,7 @@ monitor.alsa.rules = [
     ]
     actions = {
       update-props = {
-        node.description = "Headphones (3.5mm)"
+        node.description = "Audio Jack (3.5mm)"
       }
     }
   }
@@ -92,7 +92,7 @@ monitor.alsa.rules = [
     ]
     actions = {
       update-props = {
-        node.description = "Headset Mic (3.5mm)"
+        node.description = "Audio Jack (3.5mm)"
       }
     }
   }
@@ -135,8 +135,10 @@ Requires=wireplumber.service
 
 [Service]
 Type=oneshot
+RemainAfterExit=yes
 ExecStartPre=/usr/bin/sleep 3
 ExecStart=/bin/sh -c 'pactl set-card-profile alsa_card.pci-0000_c4_00.5-platform-amd_sdw off && sleep 2 && pactl set-card-profile alsa_card.pci-0000_c4_00.5-platform-amd_sdw pro-audio'
+ExecStop=/usr/bin/pactl set-card-profile alsa_card.pci-0000_c4_00.5-platform-amd_sdw off
 
 [Install]
 WantedBy=default.target
@@ -149,8 +151,8 @@ Enable with `systemctl --user daemon-reload && systemctl --user enable fix-sdw-s
 | Plasma name | PipeWire node | Hardware |
 |---|---|---|
 | Internal Speakers | pro-output-2 | TAS2783 SmartAmp (stereo) |
-| Headphones (3.5mm) | pro-output-0 | RT721 SDCA headphone jack |
-| Headset Mic (3.5mm) | pro-input-1 | RT721 SDCA jack mic |
+| Audio Jack (3.5mm) | pro-output-0 | RT721 SDCA headphone jack |
+| Audio Jack (3.5mm) | pro-input-1 | RT721 SDCA jack mic |
 | Internal Microphone | pro-input-4 | PDM mic array |
 | *(hidden)* | pro-input-3 | SmartAmp IV-sense |
 
