@@ -166,14 +166,48 @@ The kernel exposes no channel-routing controls for the TAS2783 path. The full mi
 
 No source-select, slot-select, channel-select, or routing enums exist. With any of the four switches off, at least one physical speaker goes silent, so UCM enables all four, but this does not fix stereo.
 
-The two TAS2783 chips (SoundWire unique IDs `0x8` and `0xb`) share a single playback DAI (`multicodec-2`). Which kernel widget name (`Spk` vs `Spk2`, `Left` vs `Right`) maps to which physical speaker has not been determined yet.
+The two TAS2783 chips (SoundWire unique IDs `0x8` and `0xb`) share a single playback DAI (`multicodec-2`).
 
 Possible root causes:
 
 1. `asoc_sdw_hw_params()` in `soc_sdw_utils.c` uses `step = 0` (identical data to both amps) without per-codec channel differentiation, but this seems like intended behavior
 2. SDCA per-chip channel-select register (IT21 input selector) is never written by the Linux TAS2783 driver - the Windows driver likely does this during init
 
-Both speakers produce audio, but there's no stereo separation.
+DAPM graph (dumped from `/sys/kernel/debug/asoc/amd-soundwire/`) shows the card-level routing is correct, `Left Spk` receives from `tas2783-1 SPK` (chip 0x8), `Right Spk` receives from `tas2783-2 SPK` (chip 0xb). Each codec has its own signal path: `Playback > ASI > FU21/FU23 > SPK > Left/Right Spk`. PipeWire, ALSA, and DAPM are all wired correctly for stereo.
+
+Both chips are configured identically at the SoundWire transport layer. Reading the DP1 Bank1 registers from `/sys/kernel/debug/soundwire/master-0-1/`:
+
+| Register (DP1 Bank1) | Chip 1 (0x8) | Chip 2 (0xb) | SoundWire field |
+|---|---|---|---|
+| 0x130 | 0x3 | 0x3 | `ChannelEn`  |
+| 0x132 | 0xf3 | 0xf3 | `SampleCtrl1` |
+| 0x134 | 0x41 | 0x41 | `OffsetCtrl1` |
+| 0x136 | 0x19 | 0x19 | `HCtrl` |
+
+`ChannelEn = 0x3` (and step = 0) means both chips receive both L and R channels. Each amp's internal DSP is then responsible for selecting only its assigned channel (left or right) and discarding the other. AFIK this is the normal approach for multi-amp SoundWire setups.
+
+```c
+if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+    ch_mask = GENMASK(ch - 1, 0);  // ch=2 -> 0x3 (both channels)
+    step = 0;                      // all codecs get both channels
+}
+
+for_each_link_ch_maps(rtd->dai_link, i, ch_maps)
+    ch_maps->ch_mask = ch_mask << (i * step);
+```
+
+The TAS2783 is an SDCA device with an Input Terminal entity (IT21) that controls which channel each chip amplifies. The Linux driver (`sound/soc/codecs/tas2783-sdw.c`) has SDCA IT21 registers in its regmap but initializes them all to `0x0`:
+
+```c
+{SDW_SDCA_CTL(1, TAS2783_SDCA_ENT_IT21, 0x04, 0), 0x0},
+{SDW_SDCA_CTL(1, TAS2783_SDCA_ENT_IT21, 0x08, 0), 0x0},
+{SDW_SDCA_CTL(1, TAS2783_SDCA_ENT_IT21, 0x10, 0), 0x0},
+{SDW_SDCA_CTL(1, TAS2783_SDCA_ENT_IT21, 0x11, 0), 0x0},
+```
+
+The driver defines `TAS2783_DEVICE_CHANNEL_LEFT` but does not appear to write per-chip channel selection to IT21. The per-chip firmware blobs (`1714-1-0x8.bin` vs `1714-1-0xB.bin`) contain per-chip calibration data matched by `unique_id` but not channel routing. The firmware works correctly on Windows, so the blobs themselves are fine. The Windows driver likely writes the IT21 channel selection register during init, and it seems the Linux driver doesn't yet.
+
+Other SoundWire amp drivers (RT1318, CS35L56) handle this by implementing `set_tdm_slot` in the codec driver. The TAS2783 driver does not implement `set_tdm_slot`.
 
 #### IV-sense capture stream corruption
 
