@@ -8,6 +8,16 @@ The internal speakers (TAS2783 SmartAmp, SoundWire) are silent out of the box on
 2. **UCM config** The system `amd-soundwire` UCM config recognizes the RT721 headset codec but fails to create Speaker or Mic devices because the kernel's CardComponents string (`cfg-amp:2 hs:rt721`) doesn't contain `spk:` and `mic:` entries
 3. **SoundWire bus corruption workaround** - a kernel issue where the SmartAmp IV-sense capture stream fails to configure (`-22 EINVAL`), corrupting the entire SoundWire bus
 
+## Work in progress: stereo channel separation (2026-07-18)
+
+Both speakers currently play an identical L+R mix instead of separate channels. Root cause
+found: the ASUS ACPI firmware omits a required SDCA DisCo constant, the kernel's SDCA
+function parse fails for both amps, and the per-amp init tables (which set DSP posture 1
+vs 4, the left/right differentiation) are never applied. Full analysis in
+`docs/investigation-stereo-channel-fix.md`, fix plan in `docs/step3-fix-plan.md`,
+kernel patches in `patches/`. Currently testing Phase 1 (diagnostic kcontrols via an
+out-of-tree module in `/usr/lib/modules/$(uname -r)/updates/`).
+
 ## ASUS Driver Downloads
 
 The firmware extraction documented here uses the SmartAMP driver from the ASUS support page:
