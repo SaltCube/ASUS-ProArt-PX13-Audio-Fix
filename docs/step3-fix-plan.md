@@ -82,6 +82,27 @@ Rollback: `sudo rm /usr/lib/modules/$(uname -r)/updates/snd-soc-tas2783-sdw.ko &
 Decision gate: identify the (register, value-per-amp) combo giving correct stereo.
 Expected: posture amp1=1, amp2=4.
 
+**RESULT (2026-07-18): VALIDATED.** Posture amp1=1 / amp2=4 gives correct stereo
+separation, verified by ear with per-amp mute isolation (amp1 muted -> only Front
+Right audible; amp2 muted -> only Front Left audible; both on -> correct sides).
+UDMPU writes were not needed. Two complications found and fixed along the way:
+
+1. Audio devices had disappeared entirely: alsa-ucm-conf >= 1.2.16 routes the
+   amd-soundwire HiFi verb through the shared /sof-soundwire/HiFi.conf, which
+   includes a per-speaker-codec file named from CardComponents. Kernel 7.2 newly
+   reports "spk:tas2783", so UCM demanded sof-soundwire/tas2783.conf - which no
+   alsa-ucm-conf release ships (not even upstream master). Wrote it
+   (ucm2/sof-soundwire/tas2783.conf, installed to /usr/share/alsa/ucm2/). This
+   also obsoletes the repo's old conf.d/amd-soundwire/HiFi.conf override, which
+   has been dead config since the June update.
+2. tas2783-1 Speaker Volume was restored to 0 at boot (stale
+   /var/lib/alsa/asound.state via alsa-restore.service), silencing the left
+   speaker. Fixed live; asound.state needs re-saving (alsactl store).
+
+The UCM file now carries the posture csets in the Speaker EnableSequence, guarded
+by If.ControlExists on the posture kcontrol so the profile still loads on a stock
+kernel (falling back to mixed L+R).
+
 ## Phase 2 - Proper fix: make the SDCA function parse succeed
 
 Goal: the ACPI init tables get applied by the existing code, amps differentiated at boot

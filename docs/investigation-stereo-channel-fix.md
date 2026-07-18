@@ -634,3 +634,16 @@ acpi device:28: function type only supported as DisCo constant   <- amp 2 parse 
 - Amp init table decode (5-byte entries, LE u32 addr + u8 val), amp1: (0x40480800,0x01) (0x00800428,0x40) (0x00800429,0) (0x0080042A,0) (0x0080042B,0) (0x40400108,0) (0x40400109,0) (0x0080005C,0x59) (0x00800082,0x20) (0x008000D2,0x04). Amp2 identical except first entry value 0x04.
 
 See `docs/step3-fix-plan.md` for the detailed implementation plan and `patches/phase1-tas2783-posture-kcontrols.patch` for the Phase 1 diff. (Both this file and the plan moved from temp/ to docs/ on 2026-07-18 so they are git-tracked; scratch material - kernel sources, ACPI decompiles, build dir - remains in temp/.)
+
+## 2026-07-18 PHASE 1 VALIDATED: root cause CONFIRMED by experiment
+
+With the patched module installed, posture amp1=1 / amp2=4 produces correct stereo
+separation (verified by ear with per-amp mute isolation). This confirms the whole causal
+chain: PPU21 PostureNumber is the channel selector, the ACPI init table values are
+correct, and the only defect is that they are never applied because the SDCA function
+parse fails. Details and the two side-issues discovered (missing sof-soundwire/tas2783.conf
+in alsa-ucm-conf breaking ALL audio devices on kernel 7.2, and stale asound.state zeroing
+the left amp volume) are recorded in docs/step3-fix-plan.md Phase 1 RESULT.
+
+Next: Phase 2 (sdca_functions.c function-type fallback) and upstreaming (kernel patch +
+alsa-ucm-conf tas2783.conf + ASUS firmware bug report).
