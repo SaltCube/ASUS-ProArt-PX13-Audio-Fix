@@ -103,6 +103,20 @@ The UCM file now carries the posture csets in the Speaker EnableSequence, guarde
 by If.ControlExists on the posture kcontrol so the profile still loads on a stock
 kernel (falling back to mixed L+R).
 
+**Reboot persistence verified (2026-07-19).** Stereo separation survives a
+reboot with no manual intervention (posture 1/4, volumes 200/200 confirmed
+after boot). Two independent persistence layers are now in place:
+
+1. `/var/lib/alsa/asound.state` - alsa-store saves the good mixer state at
+   shutdown, alsa-restore replays it at boot (this alone carried the first
+   verified reboot).
+2. `/usr/share/alsa/ucm2/sof-soundwire/tas2783.conf` (matches repo copy) -
+   UCM re-asserts posture 1/4 every time the Speaker device is enabled, so
+   the state file can go stale without breaking stereo.
+
+Remaining Phase 1 verification: one suspend/resume cycle (regcache_sync
+should replay posture; verify by ear).
+
 ## Phase 2 - Proper fix: make the SDCA function parse succeed
 
 Goal: the ACPI init tables get applied by the existing code, amps differentiated at boot
