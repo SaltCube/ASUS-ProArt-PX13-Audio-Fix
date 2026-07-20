@@ -1,49 +1,47 @@
 #!/bin/sh
+# ============================================================================
+# UNTESTED - DO NOT INSTALL until validated by a manual unbind/suspend/rebind
+# test (see docs/investigation-stereo-channel-fix.md, 2026-07-19 sections).
+# Version 1 of this hook caused a hard hang requiring a forced power-off.
+# ============================================================================
+#
 # Workaround: AMD SoundWire bus dies on s2idle resume (kernel 7.2.0-rc3).
 # All peripherals fail to resume (-110) and stay UNATTACHED; even a full
 # driver reload cannot recover (IO_PAGE_FAULT in snd_pci_ps re-probe).
-# See docs/investigation-stereo-channel-fix.md, section 2026-07-19.
 #
-# Strategy: never exercise the broken controller resume path. Unload the
-# whole ACP SoundWire stack before suspend and reload it after resume,
-# which re-enumerates the bus exactly like a fresh boot (posture csets are
-# re-applied by UCM when WirePlumber re-activates the HiFi profile).
+# Strategy: detach the SoundWire machine driver and both bus managers
+# before suspend so the broken controller resume path is never exercised,
+# then rebind after resume (fresh enumeration, UCM re-applies posture).
 #
-# Install: sudo install -Dm755 config/50-soundwire-sleep-reset.sh \
-#            /usr/lib/systemd/system-sleep/50-soundwire-reset
-# Remove:  sudo rm /usr/lib/systemd/system-sleep/50-soundwire-reset
+# Design constraints learned from the version-1 failure:
+# - systemd freezes user.slice BEFORE sleep hooks run, so a hook must
+#   NEVER call into a user manager (systemctl --user, runuser + DBus, ...)
+#   - such calls hang against the frozen manager (~90 s DBus timeout) and
+#   the desktop appears locked up.
+# - WirePlumber cannot be stopped and therefore keeps /dev/snd fds open,
+#   so module unload (modprobe -r) fails with EBUSY. Driver UNBIND via
+#   sysfs works despite open fds (ALSA snd_card_disconnect handles it).
 #
-# systemd-sleep runs this with $1=pre before suspend and $1=post after
-# resume. WirePlumber must release the ALSA devices or module unload fails
-# with "in use"; it is stopped for the duration of the sleep. Single-user
-# machine: the desktop user is hardcoded below.
+# Install (only after validation):
+#   sudo install -Dm755 config/50-soundwire-sleep-reset.sh \
+#     /usr/lib/systemd/system-sleep/50-soundwire-reset
+# Remove:
+#   sudo rm /usr/lib/systemd/system-sleep/50-soundwire-reset
 
-DESKTOP_USER=chris
-DESKTOP_UID=1000
-
-# Order matters: machine driver first, PCI/ACP driver (owns both
-# SoundWire managers) last.
-SDW_MODULES="snd_acp_sdw_legacy_mach snd_ps_sdw_dma snd_ps_pdm_dma \
-snd_soc_tas2783_sdw snd_soc_rt721_sdca snd_pci_ps"
-
-user_systemctl() {
-	runuser -u "$DESKTOP_USER" -- \
-		env XDG_RUNTIME_DIR="/run/user/$DESKTOP_UID" \
-		systemctl --user "$@"
-}
+MACH_DRV=/sys/bus/platform/drivers/amd_sdw
+MGR_DRV=/sys/bus/platform/drivers/amd_sdw_manager
 
 case "$1" in
 pre)
-	user_systemctl stop wireplumber.service 2>/dev/null
-	if ! modprobe -r $SDW_MODULES; then
-		logger -t soundwire-sleep-reset \
-			"pre-suspend module unload failed (device busy?)"
-	fi
+	# Machine driver first (sound card goes away), then the managers.
+	echo amd_sdw > "$MACH_DRV/unbind" 2>/dev/null
+	echo amd_sdw_manager.0 > "$MGR_DRV/unbind" 2>/dev/null
+	echo amd_sdw_manager.1 > "$MGR_DRV/unbind" 2>/dev/null
 	;;
 post)
-	modprobe snd_pci_ps
-	modprobe snd_acp_sdw_legacy_mach
-	user_systemctl start wireplumber.service 2>/dev/null
+	echo amd_sdw_manager.0 > "$MGR_DRV/bind" 2>/dev/null
+	echo amd_sdw_manager.1 > "$MGR_DRV/bind" 2>/dev/null
+	echo amd_sdw > "$MACH_DRV/bind" 2>/dev/null
 	;;
 esac
 exit 0

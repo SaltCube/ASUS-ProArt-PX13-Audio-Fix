@@ -686,3 +686,42 @@ Open paths (in order of preference):
    UNTESTED hypothesis; the IO_PAGE_FAULT on reload after a failed resume may or may
    not occur when unloading happens before sleep.
 3. Report upstream with the captured log.
+
+## 2026-07-19 (later) Sleep-hook workaround v1 POST-MORTEM: hard hang, forced power-off
+
+The first version of config/50-soundwire-sleep-reset.sh (commit bcfe749) hung the
+machine on its first suspend test; only a long-press power-off recovered. Journal
+from that boot (boot -1) shows the exact failure:
+
+1. systemd-sleep froze user.slice BEFORE running system-sleep hooks
+   ("Successfully froze unit 'user.slice'", 22:50:45).
+2. The hook then ran `runuser ... systemctl --user stop wireplumber` - a call into
+   the now-frozen user manager: "Cannot start frozen unit Session 4 of User chris" /
+   pam_systemd Varlink io.systemd.Login.UnitAllocationFailed. The call hung ~90 s
+   (hook start 22:50:45 -> "Performing sleep operation 'suspend'" 22:52:15). During
+   that window the whole desktop was frozen (stuck cursor, dead keyboard) - that IS
+   the user.slice freeze, visible.
+3. WirePlumber, frozen rather than stopped, still held /dev/snd fds, so
+   `modprobe -r` necessarily failed EBUSY and suspend entered with the full audio
+   stack loaded - the exact path the hook was meant to avoid.
+4. Resume then wedged harder than the first failure: journal has NO lines after
+   "PM: suspend entry"/"Filesystems sync" - no "PM: suspend exit", nothing.
+   Ctrl-Alt-Del was partially processed (Bluetooth links reset and reconnected,
+   keyboard backlight turned off) but the display never recovered. Forced power-off.
+
+Lessons (baked into the rewritten, still-UNTESTED v2 script):
+- system-sleep hooks must never call into user managers (frozen at that point).
+- WirePlumber cannot be stopped from a sleep hook, so module unload is not viable;
+  sysfs driver unbind (amd_sdw machine device + amd_sdw_manager.0/.1) works with
+  open fds instead.
+- Unknown whether the harder wake-wedge was caused by the 90 s hook stall or is
+  natural variance of the underlying resume bug (journal was lost at power-off).
+
+Validation protocol before EVER installing v2: manually unbind (sudo tee to sysfs),
+suspend once with NO hook installed, resume, manually rebind, check bus status.
+Only if that round-trips cleanly does the hook get installed.
+
+Status: hook NOT installed (removed 22:56). Suspend remains broken at the platform
+level on this kernel - parked pending either the manual validation test above, a
+kernel update, or an upstream fix; full log at temp/suspend-resume-failure-2026-07-19.log
+plus this post-mortem are the material for an upstream regression report.
