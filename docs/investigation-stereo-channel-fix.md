@@ -647,3 +647,42 @@ the left amp volume) are recorded in docs/step3-fix-plan.md Phase 1 RESULT.
 
 Next: Phase 2 (sdca_functions.c function-type fallback) and upstreaming (kernel patch +
 alsa-ucm-conf tas2783.conf + ASUS firmware bug report).
+
+## 2026-07-19 NEW ISSUE: s2idle suspend/resume kills the whole SoundWire bus
+
+Separate from the stereo fix (which survives reboots fine - see step3-fix-plan.md
+Phase 1 result). During the Phase 1 suspend/resume verification, resume from s2idle
+left ALL THREE SoundWire peripherals dead, including rt721 on the completely stock
+driver - so this is a platform/controller bug, not caused by our patched tas2783
+module.
+
+Signature (kernel 7.2.0-rc3-1-cachyos-rc, full log in
+temp/suspend-resume-failure-2026-07-19.log):
+
+- On resume: `PM: dpm_run_callback(): acpi_subsys_resume returns -110` (ETIMEDOUT)
+  for sdw:0:1:025d:0721:01 and both sdw:0:1:0102:0000:01:8/b.
+- Afterward all peripherals report "Not enumerated, skip programming BUSCLOCK_SCALE";
+  `/sys/bus/soundwire/devices/*/status` = UNATTACHED; every playback attempt fails
+  (`Program transport params failed: -61`), making PipeWire retry in a loop (GUI
+  devices flap on/off).
+- Full driver-stack reload (snd_acp_sdw_legacy_mach + codec drivers + snd_pci_ps)
+  does NOT recover the bus: re-probe hits
+  `snd_pci_ps 0000:c4:00.5: AMD-Vi: IO_PAGE_FAULT ... address=0xfffffffffffffffc`
+  (note: address = -4 cast to a pointer - looks like an errno used as a DMA address),
+  amps report "Initialization not complete", peripherals stay UNATTACHED.
+  Only a reboot recovers.
+
+History: journal shows only two s2idle suspends on this kernel (both 2026-07-19),
+both failed identically. The repo's old config/fix-sdw-speakers.service (profile
+off/on toggle after boot) hints at earlier suspend-ish trouble, but that mechanism
+cannot fix an unattached bus and the service is not installed.
+
+Open paths (in order of preference):
+1. Check whether a newer kernel (7.2-rc4+/CachyOS update) fixes resume - rc3 is a
+   moving target and this smells like an upstream regression worth searching
+   lore.kernel.org for.
+2. Workaround: systemd system-sleep hook that unloads the audio module stack before
+   suspend and reloads it after resume (avoids the broken resume path entirely) -
+   UNTESTED hypothesis; the IO_PAGE_FAULT on reload after a failed resume may or may
+   not occur when unloading happens before sleep.
+3. Report upstream with the captured log.
