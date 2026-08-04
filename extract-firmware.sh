@@ -35,7 +35,7 @@ echo "Verifying installer checksum..."
 actual_sha256=$(sha256sum "$EXE" | awk '{print $1}')
 if [ "$actual_sha256" != "$INSTALLER_SHA256" ]; then
     echo "Warning: installer SHA-256 mismatch (expected $INSTALLER_SHA256, got $actual_sha256)" >&2
-    echo "Proceeding anyway — firmware hashes will be checked after extraction." >&2
+    echo "Proceeding anyway - firmware hashes will be checked after extraction." >&2
 fi
 
 TMPDIR=$(mktemp -d)
@@ -76,7 +76,7 @@ cp "$TMPDIR/out/Firmwares/$FIRMWARE_B_NAME" "$OUTDIR/"
 install_8="${FIRMWARE_8_NAME/0x/}"
 install_B="${FIRMWARE_B_NAME/0x/}"
 
-echo "OK — firmware extracted to $OUTDIR/"
+echo "OK - firmware extracted to $OUTDIR/"
 echo "  $OUTDIR/$FIRMWARE_8_NAME  ($(wc -c < "$OUTDIR/$FIRMWARE_8_NAME") bytes)"
 echo "  $OUTDIR/$FIRMWARE_B_NAME  ($(wc -c < "$OUTDIR/$FIRMWARE_B_NAME") bytes)"
 echo ""
