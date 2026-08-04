@@ -725,3 +725,49 @@ Status: hook NOT installed (removed 22:56). Suspend remains broken at the platfo
 level on this kernel - parked pending either the manual validation test above, a
 kernel update, or an upstream fix; full log at temp/suspend-resume-failure-2026-07-19.log
 plus this post-mortem are the material for an upstream regression report.
+
+## 2026-08-03: Kernel update wiped the fix; rebuilt for rc5 + pacman hook
+
+Roughly two weeks of normal use on kernel 7.2.0-rc5-1-cachyos-rc (updated from
+rc3 at some point) before anyone noticed audio was wrong. What happened:
+
+- The kernel package update deleted `/usr/lib/modules/<old>/updates/`, taking
+  the patched module with it. The stock driver has no posture kcontrols, so the
+  UCM ControlExists guard silently skipped the posture csets (exactly as
+  designed) and alsa-restore could not replay them either.
+- Observed symptom this time: only the LEFT speaker played, carrying only the
+  left stream (not the original both-speakers-L+R-mix). Consistent with both
+  amps on fallback posture 1 (= left channel) and the right amp's volume not
+  restored (asound.state was saved against the patched kernel's control
+  numbering, so alsactl restore partially failed on the stock driver).
+- Confirmed rc5 still has the underlying bug: this boot's journal shows
+  "function type only supported as DisCo constant" for acpi device:26 and
+  device:28. Zero relevant upstream movement between rc3 and rc5;
+  sound/soc/codecs/tas2783-sdw.c and tas2783.h are byte-identical between the
+  two tags (verified by diff against GitHub raw sources).
+
+Recovery + hardening (all done today):
+
+1. Rebuilt the patched module against rc5 headers (make LLVM=1, vermagic
+   7.2.0-rc5-1-cachyos-rc), installed to updates/, depmod.
+2. Live swap without reboot: stop wireplumber/pipewire user units (twice, to
+   beat socket activation), sudo modprobe -r snd_acp_sdw_legacy_mach
+   snd_soc_tas2783_sdw, modprobe both back, restart user units. UCM re-applied
+   posture 1/4 on profile activation automatically; volumes 200/200; stereo
+   verified by ear with speaker-test.
+3. Pacman hook so this never recurs: sources at /usr/local/src/tas2783 (repo
+   src/tas2783/), rebuild script at /usr/local/bin/tas2783-module-rebuild (repo
+   config/tas2783-module-rebuild), hook at
+   /etc/pacman.d/hooks/99-tas2783-module.hook (repo
+   config/99-tas2783-module.hook). Triggers on any kernel or headers
+   install/upgrade, rebuilds for every installed kernel that has headers.
+
+Repo cleanup in the same session: removed the obsolete conf.d/amd-soundwire UCM
+override (dead since alsa-ucm-conf 1.2.16 symlinked the card to sof-soundwire)
+and the fix-sdw-speakers.service profile-cycle workaround (boot-time bus
+corruption no longer occurs on 7.2 with the current UCM). Note for installed
+systems: /usr/share/alsa/ucm2/conf.d/amd-soundwire/HiFi.conf may linger as a
+stray root-owned file from the old approach; it is inert but should be deleted.
+
+Suspend/resume: unchanged, still broken at platform level on rc5 (not retested
+this session; nothing landed upstream).

@@ -181,6 +181,21 @@ unique_id == 0xb after init_seq) - local hack, but 3 lines and robust.
    - pacman hook that rebuilds + reinstalls both modules post kernel upgrade (DKMS-lite)
    - proper DKMS package
    - accept manual rebuild until upstream fix lands
+
+   **DONE (2026-08-03): pacman hook installed.** The fragility was demonstrated
+   the hard way: the rc3 -> rc5 kernel update silently wiped `updates/` and
+   stereo regressed for weeks without the user noticing (UCM's ControlExists
+   guard made the failure silent, as designed). Now in place:
+   - patched sources tracked in repo `src/tas2783/` and installed to
+     `/usr/local/src/tas2783`
+   - `config/tas2783-module-rebuild` -> `/usr/local/bin/` (rebuilds for every
+     installed kernel with headers, `make LLVM=1`, installs to `updates/`,
+     depmod; skips kernels without headers, never fails the transaction)
+   - `config/99-tas2783-module.hook` -> `/etc/pacman.d/hooks/` (PostTransaction
+     on `usr/lib/modules/*/vmlinuz` and `*/build/Makefile` install/upgrade)
+   The rc5 module itself was rebuilt and verified 2026-08-03: driver source
+   unchanged between rc3 and rc5, posture 1/4 re-applied by UCM after a live
+   module swap, stereo confirmed by ear.
 2. **UCM**: only if Phase 2 is abandoned - add posture csets to Speaker EnableSequence
    (requires Phase 1 kcontrols present; csets on stock kernel would error).
 3. **Upstream**: report to linux-sound with the firmware analysis; proposed shape is a

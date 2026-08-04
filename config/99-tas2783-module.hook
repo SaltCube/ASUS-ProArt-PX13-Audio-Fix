@@ -1,0 +1,14 @@
+# Rebuild the patched TAS2783 SoundWire module whenever a kernel or its
+# headers are installed/upgraded, so the stereo fix survives kernel updates.
+# Install to /etc/pacman.d/hooks/99-tas2783-module.hook
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/lib/modules/*/vmlinuz
+Target = usr/lib/modules/*/build/Makefile
+
+[Action]
+Description = Rebuilding patched TAS2783 SoundWire module (stereo fix)...
+When = PostTransaction
+Exec = /usr/local/bin/tas2783-module-rebuild
