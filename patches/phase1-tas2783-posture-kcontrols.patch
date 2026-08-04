@@ -1,0 +1,22 @@
+--- a/sound/soc/codecs/tas2783-sdw.c
++++ b/sound/soc/codecs/tas2783-sdw.c
+@@ -560,6 +560,19 @@
+ 	SOC_SINGLE_RANGE_EXT_TLV("Speaker Volume", TAS2783_DVC_LVL,
+ 				 0, 0, 200, 1, tas2783_digital_getvol,
+ 				 tas2783_digital_putvol, tas2781_dvc_tlv),
++	/*
++	 * The DSP posture selects which channel of the stereo stream this
++	 * amp renders; the ACPI init tables intend posture 1 for the first
++	 * amp and 4 for the second, but are not applied because the SDCA
++	 * function parse fails on this firmware.
++	 */
++	SOC_SINGLE("DSP Posture Select",
++		   SDW_SDCA_CTL(1, TAS2783_SDCA_ENT_PPU21, 0x10, 0),
++		   0, 15, 0),
++	SOC_SINGLE("UDMPU Cluster Select",
++		   SDW_SDCA_CTL(1, TAS2783_SDCA_ENT_UDMPU23,
++				TAS2783_SDCA_CTL_UDMPU_CLUSTER, 0),
++		   0, 3, 0),
+ };
+ 
+ static s32 tas2783_validate_calibdata(struct tas2783_prv *tas_dev,

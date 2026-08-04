@@ -1,0 +1,32 @@
+#!/bin/sh
+# Rebuild the patched snd-soc-tas2783-sdw module for every installed kernel
+# and install it to that kernel's updates/ directory (which depmod prefers
+# over the stock module). Run by the pacman hook 99-tas2783-module.hook
+# after kernel or kernel-headers upgrades; safe to run manually as root.
+#
+# Sources live in /usr/local/src/tas2783 (copy of the repo's src/tas2783).
+# The CachyOS kernel is built with clang, hence LLVM=1.
+
+SRC=/usr/local/src/tas2783
+
+for moddir in /usr/lib/modules/*; do
+	kver=${moddir##*/}
+	# Skip leftover directories that no longer hold a real kernel.
+	[ -e "$moddir/vmlinuz" ] || continue
+	if [ ! -e "$moddir/build/Makefile" ]; then
+		echo "tas2783: no headers for $kver, skipping" >&2
+		continue
+	fi
+	tmp=$(mktemp -d) || exit 1
+	cp "$SRC/tas2783-sdw.c" "$SRC/tas2783.h" "$SRC/Makefile" "$tmp/"
+	if make -C "$moddir/build" M="$tmp" LLVM=1 modules >/dev/null 2>&1; then
+		install -Dm644 "$tmp/snd-soc-tas2783-sdw.ko" \
+			"$moddir/updates/snd-soc-tas2783-sdw.ko"
+		depmod "$kver"
+		echo "tas2783: installed patched module for $kver"
+	else
+		echo "tas2783: build FAILED for $kver - stock module (mono mix) stays active" >&2
+	fi
+	rm -rf "$tmp"
+done
+exit 0
