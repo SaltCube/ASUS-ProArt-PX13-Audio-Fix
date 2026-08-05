@@ -249,21 +249,33 @@ speakers depending on your alsa-ucm-conf version.
 
 ## Appendix A: Extracting firmware from the ASUS driver
 
-Only needed if `linux-firmware` does not ship the blobs (see step 2).
-
-Download `SmartAMP_TI_DCH_TexasInstruments_Z_V6.3.1.15_47519.exe` from the
-[ASUS support page](https://www.asus.com/laptops/for-creators/proart/proart-px13-hn7306/helpdesk_download?model2Name=HN7306EA)
-(pick model HN7306EAC, then "TI Smart Amplifier Driver for Speakers"), then:
+Only needed if `linux-firmware` does not ship the blobs (see step 2). In that
+case `./install.sh` handles it: it offers to download the ASUS driver, verifies
+it against the published SHA-256, extracts the two blobs and installs them under
+both names the driver tries. Extraction needs `icoutils` and `7zip`:
 
 ```fish
 sudo pacman -S --needed icoutils 7zip
-./install.sh --firmware-exe SmartAMP_TI_DCH_TexasInstruments_Z_V6.3.1.15_47519.exe
 ```
 
-That extracts the blobs and installs them under both names the driver tries,
-then continues with the rest of the install. It only does so when the blobs are
-actually missing, so the flag is harmless to pass on a machine that already has
-them. To extract without installing anything:
+To do only the firmware and nothing else:
+
+```fish
+./install.sh --firmware-only
+```
+
+If the download fails, ASUS is serving the file through a signed, short-lived
+URL that only their page can mint. Get it with a browser from the
+[support page](https://www.asus.com/laptops/for-creators/proart/proart-gopro-edition-px13-hn7306/helpdesk_download?model2Name=HN7306EAC)
+(Driver & Tools, then Audio, then "TI Smart Amplifier Driver for Speakers"),
+and point the script at the file:
+
+```fish
+./install.sh --firmware=/path/to/SmartAMP_TI_DCH_TexasInstruments_Z_V6.3.1.15_47519.exe
+```
+
+An installer left in the repo root is picked up automatically. To extract the
+blobs without installing anything:
 
 ```fish
 ./extract-firmware.sh SmartAMP_TI_DCH_TexasInstruments_Z_V6.3.1.15_47519.exe

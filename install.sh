@@ -22,7 +22,8 @@ MODDIR="/usr/lib/modules/$KVER"
 MODULE=snd-soc-tas2783-sdw.ko
 SRC_INSTALL_DIR=/usr/local/src/tas2783
 SYSTEM_CONF="$REPO_DIR/systems/HN7306EAC.conf"
-FIRMWARE_EXE=""   # set by --firmware-exe, only used if the blobs are missing
+FIRMWARE_EXE=""   # set by --firmware, an installer the user already downloaded
+FIRMWARE_PROVENANCE=""   # "asus" if the vendor vouched for the installer hash
 
 if [ -t 1 ]; then
     BOLD=$(tput bold); RED=$(tput setaf 1); GREEN=$(tput setaf 2)
@@ -102,6 +103,74 @@ step0_prerequisites() {
         die "run this script from inside the repo clone (src/tas2783 not found)"
 }
 
+# Ask ASUS for the current driver list and print the SmartAmp entry's download
+# URL, SHA-256 and version, one per line. This is what keeps the install
+# working across driver updates: both the link and the hash come from the
+# vendor at run time rather than being pinned in this repo.
+discover_installer() {
+    command -v python3 >/dev/null 2>&1 || return 1
+    local api="https://www.asus.com/support/api/product.asmx/GetPDDrivers"
+    curl -sfL --max-time 30 -A "Mozilla/5.0" \
+        "$api?website=global&model=${ASUS_MODEL}&osid=${ASUS_OSID}" 2>/dev/null |
+    python3 -c '
+import sys, json
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+want = sys.argv[1].lower()
+for group in data.get("Result", {}).get("Obj", []):
+    for f in group.get("Files", []):
+        if want in (f.get("Title") or "").lower():
+            url = (f.get("DownloadUrl") or {}).get("Global") or ""
+            sha = (f.get("sha256") or "").lower()
+            if url and sha:
+                print(url)
+                print(sha)
+                print(f.get("Version") or "unknown")
+                sys.exit(0)
+sys.exit(1)
+' "$DRIVER_TITLE_MATCH"
+}
+
+# Fetch the installer and check it against the hash the vendor publishes for
+# it. Sets FIRMWARE_PROVENANCE so the caller knows whether the hash came from
+# ASUS just now or from the fallback recorded in this repo.
+download_installer() {
+    local dest="$1" found url sha version actual
+
+    # shellcheck source=/dev/null
+    . "$SYSTEM_CONF"
+    command -v curl >/dev/null 2>&1 || return 1
+
+    if found=$(discover_installer); then
+        url=$(printf '%s\n' "$found" | sed -n 1p)
+        sha=$(printf '%s\n' "$found" | sed -n 2p)
+        version=$(printf '%s\n' "$found" | sed -n 3p)
+        FIRMWARE_PROVENANCE=asus
+        ok "ASUS lists driver $version"
+    else
+        url="${INSTALLER_URL:-}"
+        sha="${INSTALLER_SHA256:-}"
+        FIRMWARE_PROVENANCE=recorded
+        warn "could not read the ASUS driver list, falling back to the recorded link"
+    fi
+    [ -n "$url" ] && [ -n "$sha" ] || return 1
+
+    info "Downloading the installer (about 4 MB)..."
+    curl -fL --progress-bar -A "Mozilla/5.0" --max-time 300 -o "$dest" "$url" || return 1
+
+    # Never feed the extractor something unverified: an error page or a captive
+    # portal would otherwise be treated as an installer.
+    actual=$(sha256sum "$dest" | awk '{print $1}')
+    if [ "$actual" != "$sha" ]; then
+        warn "downloaded file does not match the SHA-256 published for it"
+        rm -f "$dest"
+        return 1
+    fi
+    ok "downloaded and verified against the vendor SHA-256"
+}
+
 # Extract the blobs from the ASUS Windows installer and install them under both
 # names the driver tries. Only reached when linux-firmware does not ship them.
 extract_and_install_firmware() {
@@ -120,7 +189,14 @@ extract_and_install_firmware() {
     info "Extracting from $(basename "$exe")..."
     # extract-firmware.sh verifies the SHA-256 of the installer and of both
     # blobs, and writes them to ./firmware/ relative to the repo.
-    ( cd "$REPO_DIR" && ./extract-firmware.sh "$exe" >/dev/null ) ||
+    #
+    # When the installer itself was just verified against the hash ASUS
+    # publishes for it, blobs that differ from the ones recorded here mean a
+    # newer driver, not a corrupt download, so that is a warning rather than a
+    # hard stop. Without that provenance the recorded blob hashes stay binding.
+    local allow=0
+    [ "$FIRMWARE_PROVENANCE" = "asus" ] && allow=1
+    ( cd "$REPO_DIR" && FIRMWARE_ALLOW_UNKNOWN="$allow" ./extract-firmware.sh "$exe" >/dev/null ) ||
         die "firmware extraction failed, run ./extract-firmware.sh directly to see why"
 
     # Blob names come from the same per-system config the extractor uses, so
@@ -153,27 +229,43 @@ step2_firmware() {
         return 0
     fi
 
-    warn "TAS2783 firmware not found, the speakers will stay silent without it"
+    warn "firmware blobs not detected, the speakers stay silent without them"
 
-    if [ -n "$FIRMWARE_EXE" ]; then
-        extract_and_install_firmware "$FIRMWARE_EXE"
+    # An installer the user passed in, or one already sitting in the repo.
+    local candidate="$FIRMWARE_EXE"
+    if [ -z "$candidate" ]; then
+        candidate=$(find "$REPO_DIR" -maxdepth 1 -iname 'SmartAMP*.exe' 2>/dev/null | head -1)
+        [ -n "$candidate" ] && info "found $(basename "$candidate") in the repo"
+    fi
+    if [ -n "$candidate" ]; then
+        extract_and_install_firmware "$candidate"
         return 0
     fi
 
-    # Offer the obvious thing if the installer is sitting in the repo already.
-    local candidate
-    candidate=$(find "$REPO_DIR" -maxdepth 1 -iname 'SmartAMP*.exe' 2>/dev/null | head -1)
-    if [ -n "$candidate" ] && [ -t 0 ]; then
-        info "found $(basename "$candidate")"
-        if ask_yn "Extract the firmware from it now?"; then
-            extract_and_install_firmware "$candidate"
-            return 0
-        fi
+    if [ ! -t 0 ]; then
+        info "Re-run interactively, or pass an installer: ./install.sh --firmware=PATH"
+        return 0
     fi
 
-    info "First try: sudo pacman -S linux-firmware   (20260622 or newer ships it)"
-    info "Otherwise download the ASUS SmartAMP driver (Appendix A in INSTALL.md)"
-    info "and re-run: ./install.sh --firmware-exe /path/to/SmartAMP...exe"
+    if ask_yn "Download the ASUS driver and extract the firmware now?"; then
+        # shellcheck source=/dev/null
+        . "$SYSTEM_CONF"
+        if download_installer "$REPO_DIR/$INSTALLER_FILENAME"; then
+            extract_and_install_firmware "$REPO_DIR/$INSTALLER_FILENAME"
+            return 0
+        fi
+        warn "automatic download failed"
+    fi
+
+    # ASUS serves the download button as a signed, short-lived URL, so a
+    # browser is the reliable fallback rather than another scripted attempt.
+    # shellcheck source=/dev/null
+    . "$SYSTEM_CONF"
+    printf '\n    Download "TI Smart Amplifier Driver for Speakers" from:\n'
+    printf '      %s\n' "$SUPPORT_URL"
+    printf '\n    Then re-run:\n'
+    printf '      ./install.sh --firmware=/path/to/%s\n\n' "$INSTALLER_FILENAME"
+    die "firmware is required for the speakers to make any sound"
 }
 
 # Step 3: build the patched module and put it where depmod prefers it over the
@@ -504,10 +596,13 @@ Usage:
   ./install.sh --listen     the listening test on its own
   ./install.sh --uninstall  remove everything this script installs
 
-  --firmware-exe PATH       only needed if linux-firmware does not ship the
-                            blobs: extract them from the ASUS SmartAMP
-                            installer at PATH. Download it yourself first,
-                            see Appendix A in INSTALL.md.
+Firmware. Normally there is nothing to do here, because linux-firmware ships
+the blobs. When it does not, a plain ./install.sh offers to download the ASUS
+driver and extract them. These two flags are for doing that part by hand:
+
+  --firmware=PATH           use this already downloaded ASUS installer instead
+                            of downloading one
+  --firmware-only           do the firmware and stop, installing nothing else
 
 Run as your normal user, not as root: it installs a per-user WirePlumber
 config, and calls sudo only for the steps that need it.
@@ -521,10 +616,11 @@ main() {
             --check)          action=check ;;
             --listen)         action=listen ;;
             --uninstall)      action=uninstall ;;
-            --firmware-exe)   shift
-                              [ $# -gt 0 ] || die "--firmware-exe needs a path"
+            --firmware)       shift
+                              [ $# -gt 0 ] || die "--firmware needs a path to the ASUS installer"
                               FIRMWARE_EXE="$1" ;;
-            --firmware-exe=*) FIRMWARE_EXE="${1#*=}" ;;
+            --firmware=*)     FIRMWARE_EXE="${1#*=}" ;;
+            --firmware-only)  action=firmware ;;
             -h|--help)        usage; exit 0 ;;
             *)                die "unknown option: $1 (try --help)" ;;
         esac
@@ -537,6 +633,12 @@ main() {
                    exit "$rc" ;;
         listen)    listening_test; exit $? ;;
         uninstall) do_uninstall; exit 0 ;;
+        firmware)  # Firmware and nothing else, for doing the rest by hand.
+                   # No sudo prompt up front: if the blobs are already there,
+                   # this needs no privileges at all.
+                   [ "$(id -u)" -ne 0 ] || die "run this as your normal user, not root"
+                   step2_firmware
+                   exit 0 ;;
     esac
 
     [ "$(id -u)" -ne 0 ] ||

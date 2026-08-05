@@ -63,8 +63,16 @@ if [ "$actual_B" != "$FIRMWARE_B_SHA256" ]; then
     fail=1
 fi
 if [ "$fail" -eq 1 ]; then
-    echo "Firmware verification failed." >&2
-    exit 1
+    # Set by install.sh when the installer was verified against the SHA-256
+    # ASUS publishes for it. Blobs that differ from the recorded ones then mean
+    # ASUS shipped a new driver, which should not block the install.
+    if [ "${FIRMWARE_ALLOW_UNKNOWN:-0}" = "1" ]; then
+        echo "Continuing anyway: the installer matched the vendor SHA-256, so these" >&2
+        echo "are the blobs ASUS ships now. Update systems/*.conf if they are correct." >&2
+    else
+        echo "Firmware verification failed." >&2
+        exit 1
+    fi
 fi
 
 # Copy to output

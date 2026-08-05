@@ -15,5 +15,7 @@ PX-13-audio-context-compact.txt
 Module.symvers
 modules.order
 
-# Firmware extracted from the ASUS installer, redistribution not ours to make
+# The ASUS installer and the firmware extracted from it: redistribution is not
+# ours to make, and install.sh downloads the installer into the repo root.
 firmware/
+*.exe
