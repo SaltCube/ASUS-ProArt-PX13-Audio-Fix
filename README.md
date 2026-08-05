@@ -2,6 +2,10 @@
 
 Configs, fixes, bug workarounds for audio on linux (CachyOS specifically) on the ASUS ProArt PX13 HN7306EAC
 
+**To install this on a working machine, follow [INSTALL.md](INSTALL.md).** The
+rest of this file is background: what was broken, how it was diagnosed, and what
+is still broken.
+
 The internal speakers (TAS2783 SmartAmp, SoundWire) are silent out of the box on Linux. Three things are missing:
 
 1. **Firmware blobs** don't ship for linux by default for ASUS subsystem ID `0x1714`
@@ -34,24 +38,8 @@ The working solution stack (kernel 7.2.0-rc5, alsa-ucm-conf >= 1.2.16):
 4. **WirePlumber config** (`config/51-strix-halo-audio.conf`): keeps the card on
    the UCM-backed HiFi profile and hides the Pro Audio profile.
 
-Install (from repo root, after the firmware steps below):
-
-```fish
-# build the module
-cd src/tas2783
-make -C /usr/lib/modules/$(uname -r)/build M=$PWD LLVM=1 modules
-sudo install -Dm644 snd-soc-tas2783-sdw.ko /usr/lib/modules/$(uname -r)/updates/snd-soc-tas2783-sdw.ko
-sudo depmod
-cd ../..
-# UCM + WirePlumber
-sudo install -Dm644 ucm2/sof-soundwire/tas2783.conf /usr/share/alsa/ucm2/sof-soundwire/tas2783.conf
-install -Dm644 config/51-strix-halo-audio.conf ~/.config/wireplumber/wireplumber.conf.d/51-strix-halo-audio.conf
-# survive kernel updates
-sudo install -Dm644 -t /usr/local/src/tas2783 src/tas2783/tas2783-sdw.c src/tas2783/tas2783.h src/tas2783/Makefile
-sudo install -Dm755 config/tas2783-module-rebuild /usr/local/bin/tas2783-module-rebuild
-sudo install -Dm644 config/99-tas2783-module.hook /etc/pacman.d/hooks/99-tas2783-module.hook
-# reboot, then verify: speaker-test -D pipewire -c2 -t wav
-```
+Step by step install instructions, including verification and uninstall, are in
+[INSTALL.md](INSTALL.md).
 
 Known remaining issue: s2idle suspend/resume kills the whole SoundWire bus (all
 peripherals, including the stock RT721) at the platform level - pre-existing
@@ -72,10 +60,24 @@ Look for *TI Smart Amplifier Driver for Speakers* under that. The file used in t
 
 ### Prerequisites
 
-- **Kernel 7.0+** - an initial driver landed mainline 2026-03-16. On 6.x kernels, only a capture-only `acp-pdm-mach` device appears, not the SoundWire card.
-- **CachyOS** ships `linux-cachyos` 7.0.x from the `cachyos-znver4` repo, which works.
+- **Kernel 7.2+** for the full fix. An initial driver landed mainline 2026-03-16
+  (7.0), but 7.2 is what reports `spk:tas2783` in CardComponents, which is what
+  makes the UCM profile load. On 6.x kernels, only a capture-only
+  `acp-pdm-mach` device appears, not the SoundWire card.
+- Full prerequisite list and install steps: [INSTALL.md](INSTALL.md).
 
-### Step 1
+### Step 1 (OBSOLETE since linux-firmware 20260622)
+
+> **This step is no longer needed.** `linux-firmware-other` (pulled in by
+> `linux-firmware`) now ships the blobs for this laptop as
+> `/lib/firmware/1714-1-0x8.bin.zst` and `1714-1-0xB.bin.zst`, symlinked from
+> `ti/audio/tas2783/`. Verified 2026-08-04: they are **byte for byte identical**
+> to the ones extracted from the ASUS installer below, and the 7.2 driver asks
+> for exactly those names (`tas_generate_fw_name()` builds
+> `%04X-%1X-0x%1X.bin` from the PCI subsystem ID, falling back to the
+> no-`0x` name only if that fails). The kernel decompresses `.zst` firmware
+> itself, so nothing needs installing. The manual extraction below is kept as a
+> fallback for distros with older linux-firmware.
 
 The firmware must be extracted from the ASUS Windows driver, download link above.
 
