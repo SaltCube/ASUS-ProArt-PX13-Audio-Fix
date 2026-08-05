@@ -21,6 +21,7 @@ SRC_INSTALL_DIR=/usr/local/src/tas2783
 SYSTEM_CONF="$REPO_DIR/systems/HN7306EAC.conf"
 FIRMWARE_EXE=""   # set by --firmware, an installer the user already downloaded
 FIRMWARE_PROVENANCE=""   # "asus" if the vendor vouched for the installer hash
+WITH_BUS_RESET=0  # set by --with-bus-reset, installs the once-per-boot service
 
 if [ -t 1 ]; then
     BOLD=$(tput bold); RED=$(tput setaf 1); GREEN=$(tput setaf 2)
@@ -340,13 +341,28 @@ step6_hook() {
     info "The hook builds from $SRC_INSTALL_DIR, so this clone can be moved or deleted."
 }
 
-# Step 7: the boot-time bus reset. Without this the right speaker is silent on
-# every boot: PipeWire's probe of the IV-sense capture PCM fails with -22 and
-# leaves the transport in a state where the second amp renders nothing.
+# Step 7: the bus reset. On some boots PipeWire's probe of the IV-sense
+# capture PCM leaves the transport with the second amp rendering nothing, and
+# cycling the card profile repairs it. The helper script always installs so
+# --check (and the user) can repair such a boot by hand; the once-per-boot
+# service is opt-in because the audible failure has proven rare and the
+# profile cycle makes the audio devices flicker at every login.
 step7_bus_reset() {
-    step "Step 7: installing the boot-time bus reset"
+    step "Step 7: installing the bus reset"
 
     overlay_install install/root/usr/local/bin/tas2783-bus-reset
+
+    if [ "$WITH_BUS_RESET" -eq 0 ]; then
+        if systemctl --user is-enabled fix-sdw-speakers.service >/dev/null 2>&1; then
+            ok "fix-sdw-speakers.service already enabled, leaving it"
+        else
+            info "Boot-time service not installed (optional). If the right speaker"
+            info "is ever silent after a boot, run tas2783-bus-reset, and consider:"
+            info "  ./install.sh --with-bus-reset"
+        fi
+        return 0
+    fi
+
     # A user service, not a system one: it drives pactl, which needs the
     # session's PipeWire.
     overlay_install install/home/.config/systemd/user/fix-sdw-speakers.service
@@ -412,11 +428,12 @@ step8_verify() {
         fi
     fi
 
+    # Optional, so its absence is not a failure; the listening test points at
+    # the flag if a boot actually shows the fault this service repairs.
     if systemctl --user is-enabled fix-sdw-speakers.service >/dev/null 2>&1; then
-        ok "boot-time bus reset service enabled"
+        ok "boot-time bus reset service enabled (optional)"
     else
-        fail "fix-sdw-speakers.service not enabled, the right speaker will be silent after a boot"
-        failed=1
+        info "boot-time bus reset service not installed (optional, see README.md step 7)"
     fi
 
     if [ "$failed" -ne 0 ]; then
@@ -507,13 +524,13 @@ listening_test() {
     if [ "$left" = "l" ] && [ "$right" = "n" ]; then
         printf '\n'
         warn "right speaker silent: the boot-time SoundWire bus corruption"
-        if [ ! -x /usr/local/bin/tas2783-bus-reset ]; then
-            fail "/usr/local/bin/tas2783-bus-reset is not installed (README.md step 7)"
-            return 1
-        fi
+        # The installed helper if there is one, the repo copy otherwise, so the
+        # repair works even from a bare clone.
+        local reset=/usr/local/bin/tas2783-bus-reset
+        [ -x "$reset" ] || reset="$REPO_DIR/install/root/usr/local/bin/tas2783-bus-reset"
 
         info "Running the bus reset, this takes about 10 seconds..."
-        /usr/local/bin/tas2783-bus-reset >/dev/null 2>&1 || true
+        "$reset" >/dev/null 2>&1 || true
         sleep 1
 
         info "Playing the RIGHT channel again..."
@@ -526,7 +543,8 @@ listening_test() {
                 info "fix-sdw-speakers.service is enabled but did not do this at boot."
                 info "Check it with: systemctl --user status fix-sdw-speakers.service"
             else
-                info "Enable it so this happens automatically: README.md step 7."
+                info "This is the failure the optional boot-time service repairs"
+                info "automatically. Reinstall with: ./install.sh --with-bus-reset"
             fi
             return 0
         fi
@@ -626,6 +644,13 @@ Usage:
   ./install.sh --listen     the listening test on its own
   ./install.sh --uninstall  remove everything this script installs
 
+  --with-bus-reset          also install and enable a user service that runs
+                            the bus reset once per boot. Optional: on rare
+                            boots the right speaker comes up silent, and this
+                            repairs it automatically at the cost of the audio
+                            devices flickering at every login. --check tells
+                            you if your machine needs it.
+
 Firmware. Normally there is nothing to do here, because linux-firmware ships
 the blobs. When it does not, a plain ./install.sh offers to download the ASUS
 driver and extract them. These two flags are for doing that part by hand:
@@ -651,6 +676,7 @@ main() {
                               FIRMWARE_EXE="$1" ;;
             --firmware=*)     FIRMWARE_EXE="${1#*=}" ;;
             --firmware-only)  action=firmware ;;
+            --with-bus-reset) WITH_BUS_RESET=1 ;;
             -h|--help)        usage; exit 0 ;;
             *)                die "unknown option: $1 (try --help)" ;;
         esac

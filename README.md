@@ -6,9 +6,9 @@ distributions.
 
 Out of the box the two TAS2783 SmartAmp speakers do not render separate
 channels: both play the same mix, or one plays and the other is silent. Fixing
-that takes a patched codec module, a UCM file that selects a channel per amp,
-and a bus reset once per boot. What is broken and why is in
-[docs/analysis.md](docs/analysis.md).
+that takes a patched codec module and a UCM file that selects a channel per
+amp. An optional service works around a rarer boot-time fault (step 7). What
+is broken and why is in [docs/analysis.md](docs/analysis.md).
 
 ## Quick install
 
@@ -45,10 +45,10 @@ The `install/` tree mirrors where its files land: everything under
 |---|---|
 | `install/root/usr/share/alsa/ucm2/sof-soundwire/tas2783.conf` | Defines the Speaker device, sets posture 1 (left) / 4 (right) |
 | `install/root/usr/local/bin/tas2783-module-rebuild` | Rebuilds the module for every installed kernel |
-| `install/root/usr/local/bin/tas2783-bus-reset` | Cycles the card profile once per boot to repair the SoundWire transport |
+| `install/root/usr/local/bin/tas2783-bus-reset` | Cycles the card profile to repair the SoundWire transport |
 | `install/root/etc/pacman.d/hooks/99-tas2783-module.hook` | Runs the rebuild after each kernel or headers upgrade |
 | `install/home/.config/wireplumber/wireplumber.conf.d/51-strix-halo-audio.conf` | Pins the card to the UCM-backed HiFi profile |
-| `install/home/.config/systemd/user/fix-sdw-speakers.service` | Runs the bus reset after WirePlumber starts |
+| `install/home/.config/systemd/user/fix-sdw-speakers.service` | Runs the bus reset once per boot; only with `--with-bus-reset` |
 
 Two things live outside that tree because they are not plain file copies: the
 patched module (built from `src/tas2783/`, installed to
@@ -180,29 +180,40 @@ You can run it by hand at any time:
 sudo /usr/local/bin/tas2783-module-rebuild
 ```
 
-## Step 7: Install the boot-time bus reset
+## Step 7: The bus reset (optional service)
 
-Without this step the right speaker is silent on every boot, even with
-everything above installed correctly.
+On some boots the right speaker is silent even with everything above installed
+correctly. When PipeWire starts it probes every PCM on the card, including the
+SmartAmp IV-sense capture stream. That probe fails with `-22` at every boot,
+and on some boots it leaves the SoundWire transport in a state where the
+second amp receives nothing. The mixer gives no hint that anything is wrong:
+both amps read unmuted with postures 1 and 4 applied either way. Cycling the
+card profile reprograms the transport and repairs it.
 
-When PipeWire starts it probes every PCM on the card, including the SmartAmp
-IV-sense capture stream. That probe fails with `-22` and leaves the SoundWire
-transport in a state where the second amp receives nothing. Cycling the card
-profile reprograms it. The mixer gives no hint that anything is wrong: both amps
-read unmuted with postures 1 and 4 applied either way.
+The repair script is part of the normal install:
 
 ```fish
 sudo install -Dm755 install/root/usr/local/bin/tas2783-bus-reset \
   /usr/local/bin/tas2783-bus-reset
+```
+
+Run `/usr/local/bin/tas2783-bus-reset` by hand any time the right speaker goes
+quiet, or let `./install.sh --check` do it for you.
+
+The audible failure is rare, so automating the repair is opt-in. A user
+service can run the reset once per boot, at the cost of the audio devices
+flickering shortly after every login. Install it with
+`./install.sh --with-bus-reset`, or by hand:
+
+```fish
 install -Dm644 install/home/.config/systemd/user/fix-sdw-speakers.service \
   ~/.config/systemd/user/fix-sdw-speakers.service
 systemctl --user daemon-reload
 systemctl --user enable fix-sdw-speakers.service
 ```
 
-The service is a user service because it drives `pactl`, which talks to your
-session's PipeWire. Run `/usr/local/bin/tas2783-bus-reset` by hand any time the
-right speaker goes quiet.
+It is a user service because it drives `pactl`, which talks to your session's
+PipeWire.
 
 ## Step 8: Reboot
 
@@ -235,7 +246,7 @@ amixer -c amdsoundwire cget name='tas2783-2 DSP Posture Select'
 # 4. the amd_sdw card is on the HiFi profile, not pro-audio or off
 pactl list cards | grep -E 'Name: alsa_card|Active Profile'
 
-# 5. the bus reset ran this boot
+# 5. only if you installed the optional step 7 service: it ran this boot
 systemctl --user status fix-sdw-speakers.service
 
 # 6. listen: "Front Left" from the left speaker only, then "Front Right" from
@@ -249,8 +260,9 @@ speaker actually makes sound.
 - **Both amps read `values=1`**: the UCM condition did not match and you are
   running the stock module. Re-check steps 3 and 4, then reboot.
 - **Postures read 1 and 4 but the right speaker is silent**: the boot-time bus
-  corruption. Run `/usr/local/bin/tas2783-bus-reset`; if that fixes it, step 7
-  is missing or its service did not run.
+  corruption. Run `/usr/local/bin/tas2783-bus-reset`; if that fixes it and it
+  keeps happening, install the optional step 7 service:
+  `./install.sh --with-bus-reset`.
 
 ## Uninstall
 
@@ -274,6 +286,9 @@ speakers depending on your alsa-ucm-conf version.
 
 ## Known issues
 
+- **On rare boots the right speaker comes up silent** while every mixer
+  reading looks correct. Run `/usr/local/bin/tas2783-bus-reset`, or install
+  the optional once-per-boot service (step 7).
 - **Suspend/resume kills all SoundWire audio until reboot.** A platform-level
   kernel bug, present with or without this fix and affecting the stock RT721
   codec too. After a suspend, expect no audio from any device, and expect
@@ -325,7 +340,7 @@ and in `/lib/firmware/ti/audio/tas2783/`.
 
 ## Appendix B: Swapping the module without rebooting
 
-Instead of step 7. PipeWire holds the card open, so it must be stopped first,
+Instead of step 8. PipeWire holds the card open, so it must be stopped first,
 twice, because socket activation restarts it:
 
 ```fish

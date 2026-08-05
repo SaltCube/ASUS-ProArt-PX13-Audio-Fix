@@ -136,24 +136,32 @@ sdw_deprepare_stream: subdevice #0-Capture: inconsistent state state 1
 `SDW1-PIN4-CAPTURE-SmartAmp` is the IV-sense capture stream, PCM 3. The UCM
 configuration does not define it as a device.
 
-After such a boot, with the fix installed: the right speaker produces nothing,
-while the left one works. At the same time both amps report unmuted switches,
-volumes at 200, postures 1 and 4, all three SoundWire peripherals report
-`Attached`, the sink is unmuted with both channels at 100%, and the card is on
-the HiFi profile.
+On a boot observed on 2026-08-04, with the fix installed: the right speaker
+produced nothing, while the left one worked. At the same time both amps
+reported unmuted switches, volumes at 200, postures 1 and 4, all three
+SoundWire peripherals reported `Attached`, the sink was unmuted with both
+channels at 100%, and the card was on the HiFi profile.
 
-Forcing a fresh posture write to amp 2 does not restore output. Cycling the card
-profile `off` then `HiFi` does, immediately.
+Forcing a fresh posture write to amp 2 did not restore output. Cycling the
+card profile `off` then `HiFi` did, immediately.
+
+On 2026-08-05, three consecutive boots with no bus reset played correct stereo
+while the same probe failures appeared in the log each time (about 60 error
+lines per boot).
 
 ### Conclusion
 
 PipeWire's ACP layer probes every PCM the card exposes, including the one UCM
-omits. That probe fails and leaves the SoundWire transport in a state where the
-second amp receives no data, which is why the fault is invisible to every mixer
-level check.
+omits. That probe fails at every boot, and on some boots it leaves the
+SoundWire transport in a state where the second amp receives no data, which is
+why the fault is invisible to every mixer level check. What separates a boot
+that comes up broken from one that does not is not known; the audible failure
+is the rare case.
 
 Cycling the profile tears the streams down and reprograms the transport.
-`fix-sdw-speakers.service` does this once per boot, after WirePlumber starts.
+`fix-sdw-speakers.service` does this once per boot, after WirePlumber starts;
+because the failure is rare, the service is opt-in
+(`./install.sh --with-bus-reset`) rather than part of the default install.
 
 ## Suspend and resume
 

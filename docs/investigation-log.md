@@ -10,6 +10,8 @@ that is still outstanding, read [kernel-fix-plan.md](kernel-fix-plan.md).
 - **2026-08-03**: a kernel update had wiped the fix; rebuild hook added.
 - **2026-08-04**: boot-time bus corruption confirmed still real; bus reset
   service, install script, repo restructure.
+- **2026-08-05**: the audible boot failure is rare; bus reset service demoted
+  to opt-in.
 
 Paths under `temp/` were scratch working files: kernel sources, ACPI decompiles
 and captured logs. That directory is gitignored and its contents are not part of
@@ -792,3 +794,29 @@ Consequences, all landed the same day:
 posture controls to 1 and 1, and a profile cycle rewrites them to 1 and 4
 without restoring audio. Consistent with the codecs losing state along with
 the bus; reboot remains the only recovery.
+
+## 2026-08-05 the audible boot failure is rare; bus reset service demoted to opt-in
+
+A deliberate trial with `fix-sdw-speakers.service` disabled: three consecutive
+boots, no manual intervention, and both speakers played correctly every time,
+while the IV-sense probe failure appeared in the log on each boot (about 60
+error lines at PipeWire start). So the probe storm happens at every boot, but
+the transport corruption it was blamed for is intermittent, and the audible
+failure is the rare case.
+
+Reassessment of the evidence for the service: exactly one confirmed audible
+occurrence (2026-08-04, previous entry). The "masked for weeks by the manual
+procedures" argument only shows the historical rate is unknowable, not that it
+was high; the every-boot framing in the previous entry overstated it.
+
+Demoted accordingly, same day:
+
+- Default `./install.sh` installs only the `tas2783-bus-reset` helper script.
+  The service unit is installed and enabled only with `--with-bus-reset`.
+- `--check` no longer fails when the service is absent. When the listening
+  test finds the right speaker silent and the bus reset repairs it, it tells
+  the user to reinstall with `--with-bus-reset`; that live repair is the
+  signal the machine actually needs the service.
+- README step 7 rewritten as the optional workaround, analysis.md conclusion
+  softened to match: what separates a broken boot from a clean one is not
+  known.
