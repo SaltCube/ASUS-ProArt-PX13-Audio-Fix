@@ -395,6 +395,13 @@ do_install() {
     step0_prerequisites
 
     printf '\n    This installs system files and needs sudo for some steps.\n'
+    # A cached sudo timestamp is fine; otherwise sudo needs a terminal to
+    # prompt on, which it does not have when the script is piped or run
+    # from an editor or agent shell.
+    if ! sudo -n true 2>/dev/null && [ ! -t 0 ]; then
+        die "sudo needs a password and there is no terminal to type it into.
+    Run ./install.sh from a normal terminal window instead."
+    fi
     sudo -v || die "sudo is required"
 
     step2_firmware
