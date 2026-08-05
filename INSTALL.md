@@ -180,6 +180,11 @@ UCM sequence. To avoid one, see
 
 ## Step 9: Verify
 
+`./install.sh --check` runs everything below, then plays a tone from each
+channel and asks which speaker you heard. If the right one is silent it runs the
+bus reset and retests, so it both finds and fixes the common failure. The manual
+equivalent:
+
 ```fish
 # 1. the patched module is the one loaded (path must contain updates/)
 modinfo -F filename snd_soc_tas2783_sdw

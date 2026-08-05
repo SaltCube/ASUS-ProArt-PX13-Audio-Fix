@@ -253,18 +253,114 @@ step8_verify() {
         failed=1
     fi
 
-    if [ "$failed" -eq 0 ]; then
-        # Every check above passes whether or not the right amp makes sound, so
-        # the listening test is not optional.
-        printf '\n%sAll checks passed.%s Now listen, which is the only test that\n' "$BOLD$GREEN" "$RESET"
-        printf 'catches a silent amp. Front Left from the left speaker only, then\n'
-        printf 'Front Right from the right speaker only:\n'
-        printf '    speaker-test -D pipewire -c2 -t wav\n'
-        printf '\nIf the right speaker stays quiet, run: /usr/local/bin/tas2783-bus-reset\n'
-    else
+    if [ "$failed" -ne 0 ]; then
         printf '\n%sSome checks failed.%s See INSTALL.md step 9.\n' "$BOLD$RED" "$RESET"
         return 1
     fi
+
+    ok "all automated checks passed"
+    return 0
+}
+
+# Play one channel and ask which speaker it came out of. Every automated check
+# above passes whether or not an amp actually makes sound, so this is the only
+# test that catches a silent amp, and it needs ears.
+play_channel() {
+    timeout 15 speaker-test -D pipewire -c2 -t wav -s "$1" -l 1 >/dev/null 2>&1 || true
+}
+
+ask_speaker() {
+    local prompt="$1" reply
+    while true; do
+        # The prompt goes to stderr: stdout is the answer, captured by the
+        # caller's command substitution.
+        printf '    %s %s[l]%seft, %s[r]%sight, %s[b]%soth, %s[n]%seither: ' \
+            "$prompt" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" >&2
+        read -r reply || return 1
+        case "$reply" in
+            [Ll]*) echo l; return 0 ;;
+            [Rr]*) echo r; return 0 ;;
+            [Bb]*) echo b; return 0 ;;
+            [Nn]*) echo n; return 0 ;;
+        esac
+    done
+}
+
+listening_test() {
+    step "Listening test"
+
+    if [ ! -t 0 ]; then
+        info "not running on a terminal, skipping the listening test"
+        return 0
+    fi
+    command -v speaker-test >/dev/null 2>&1 || {
+        warn "speaker-test not found (install alsa-utils), skipping"
+        return 0
+    }
+
+    info "Turn the volume up enough to hear which side is playing."
+    printf '\n'
+
+    local left right
+    info "Playing the LEFT channel..."
+    play_channel 1
+    left=$(ask_speaker "Which speaker played?") || return 0
+
+    info "Playing the RIGHT channel..."
+    play_channel 2
+    right=$(ask_speaker "Which speaker played?") || return 0
+
+    if [ "$left" = "l" ] && [ "$right" = "r" ]; then
+        printf '\n%sStereo is working.%s\n' "$BOLD$GREEN" "$RESET"
+        return 0
+    fi
+
+    # The one fault this script can fix by itself: the boot-time bus corruption
+    # leaves amp 2 rendering nothing, and cycling the card profile repairs it.
+    if [ "$left" = "l" ] && [ "$right" = "n" ]; then
+        printf '\n'
+        warn "right speaker silent: the boot-time SoundWire bus corruption"
+        if [ ! -x /usr/local/bin/tas2783-bus-reset ]; then
+            fail "/usr/local/bin/tas2783-bus-reset is not installed (INSTALL.md step 7)"
+            return 1
+        fi
+
+        info "Running the bus reset, this takes about 10 seconds..."
+        /usr/local/bin/tas2783-bus-reset >/dev/null 2>&1 || true
+        sleep 1
+
+        info "Playing the RIGHT channel again..."
+        play_channel 2
+        right=$(ask_speaker "Which speaker played?") || return 0
+
+        if [ "$right" = "r" ]; then
+            printf '\n%sFixed.%s The bus reset repaired it.\n' "$BOLD$GREEN" "$RESET"
+            if systemctl --user is-enabled fix-sdw-speakers.service >/dev/null 2>&1; then
+                info "fix-sdw-speakers.service is enabled but did not do this at boot."
+                info "Check it with: systemctl --user status fix-sdw-speakers.service"
+            else
+                info "Enable it so this happens automatically: INSTALL.md step 7."
+            fi
+            return 0
+        fi
+
+        fail "still silent after the bus reset"
+        info "Collect the evidence with:"
+        info "  journalctl -b -k | grep -iE 'tas2783|sdw|soundwire'"
+        return 1
+    fi
+
+    printf '\n'
+    case "$left$right" in
+        rl) fail "channels are swapped: amp 1 and amp 2 have each other's posture"
+            info "Swap the 1 and 4 values in /usr/share/alsa/ucm2/sof-soundwire/tas2783.conf" ;;
+        bb) fail "both speakers play both channels: no stereo separation"
+            info "The stock module is loaded, or the UCM posture sequence did not run." ;;
+        nn) fail "no sound at all from either speaker"
+            info "Check the volume and that the Speaker sink is the default output." ;;
+        *)  fail "unexpected result (left channel: $left, right channel: $right)" ;;
+    esac
+    return 1
 }
 
 do_uninstall() {
@@ -323,7 +419,10 @@ runs match the step numbers in that document.
 
 Usage:
   ./install.sh              install everything, then tell you to reboot
-  ./install.sh --check      run the verification checks only, change nothing
+  ./install.sh --check      verify the install, then play test tones and ask
+                            which speaker you heard, repairing the bus if the
+                            right one is silent
+  ./install.sh --listen     the listening test on its own
   ./install.sh --uninstall  remove everything this script installs
 
 Run as your normal user, not as root: it installs a per-user WirePlumber
@@ -332,9 +431,13 @@ EOF
 }
 
 main() {
+    local rc=0
     case "${1:-}" in
         "")            ;;
-        --check)       step8_verify; exit $? ;;
+        --check)       step8_verify || rc=1
+                       listening_test || rc=1
+                       exit "$rc" ;;
+        --listen)      listening_test; exit $? ;;
         --uninstall)   do_uninstall; exit 0 ;;
         -h|--help)     usage; exit 0 ;;
         *)             die "unknown option: $1 (try --help)" ;;
