@@ -429,23 +429,32 @@ ask_yn() {
         case "$reply" in
             [Yy]*) return 0 ;;
             [Nn]*) return 1 ;;
+            *) printf '    %sanswer y or n%s\n' "$YELLOW" "$RESET" >&2 ;;
         esac
     done
 }
 
 ask_speaker() {
     local prompt="$1" reply
+    # Laid out like the bash "select" builtin, which is what a menu looks like
+    # in most shell scripts: options one per line, then a "#?" prompt. Numbered
+    # rather than lettered because a lowercase "l" for left is indistinguishable
+    # from "1" in most terminal fonts, so people type the digit; letters are
+    # still accepted. All of it goes to stderr, because stdout carries the
+    # answer back through the caller's command substitution.
+    printf '    %s\n' "$prompt" >&2
+    printf '      %s1%s) left\n      %s2%s) right\n      %s3%s) both\n      %s4%s) neither\n' \
+        "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" >&2
     while true; do
-        # The prompt goes to stderr: stdout is the answer, captured by the
-        # caller's command substitution.
-        printf '    %s %s[l]%seft, %s[r]%sight, %s[b]%soth, %s[n]%seither: ' \
-            "$prompt" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" >&2
+        printf '    #? ' >&2
         read -r reply || return 1
         case "$reply" in
-            [Ll]*) echo l; return 0 ;;
-            [Rr]*) echo r; return 0 ;;
-            [Bb]*) echo b; return 0 ;;
-            [Nn]*) echo n; return 0 ;;
+            1|[Ll]|[Ll][Ee][Ff][Tt])       echo l; return 0 ;;
+            2|[Rr]|[Rr][Ii][Gg][Hh][Tt])   echo r; return 0 ;;
+            3|[Bb]|[Bb][Oo][Tt][Hh])       echo b; return 0 ;;
+            4|[Nn]|[Nn][Ee][Ii][Tt][Hh][Ee][Rr]) echo n; return 0 ;;
+            # Silently re-prompting looks like the script has hung.
+            *) printf '    %sanswer 1, 2, 3 or 4%s\n' "$YELLOW" "$RESET" >&2 ;;
         esac
     done
 }
