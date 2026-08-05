@@ -1,0 +1,13 @@
+[Unit]
+# Works around the boot-time SoundWire bus corruption that leaves the right
+# speaker silent. See /usr/local/bin/tas2783-bus-reset for the details.
+Description=Reset the SoundWire bus so both TAS2783 amps render (stereo fix)
+After=wireplumber.service
+Requires=wireplumber.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/tas2783-bus-reset
+
+[Install]
+WantedBy=default.target

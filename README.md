@@ -10,7 +10,7 @@ The internal speakers (TAS2783 SmartAmp, SoundWire) are silent out of the box on
 
 1. **Firmware blobs** don't ship for linux by default for ASUS subsystem ID `0x1714`
 2. **UCM config** The system `amd-soundwire` UCM config recognizes the RT721 headset codec but fails to create Speaker or Mic devices because the kernel's CardComponents string (`cfg-amp:2 hs:rt721`) doesn't contain `spk:` and `mic:` entries
-3. **SoundWire bus corruption workaround** - a kernel issue where the SmartAmp IV-sense capture stream fails to configure (`-22 EINVAL`), corrupting the entire SoundWire bus
+3. **SoundWire bus corruption workaround** - a kernel issue where the SmartAmp IV-sense capture stream fails to configure (`-22 EINVAL`), leaving the SoundWire transport in a state where the second amp is silent
 
 ## SOLVED: stereo channel separation (2026-08-03)
 
@@ -159,16 +159,19 @@ sed -i '/platform-amd_sdw/d' ~/.local/state/wireplumber/default-routes
 
 The PCI BDF `0000_c4_00.5` may differ on other units check with `pactl list short cards | grep sdw`.
 
-### Step 4 (OBSOLETE)
+### Step 4: Boot-time bus reset
 
-> **This step is no longer needed** on kernel 7.2 with the current UCM config:
-> the boot-time bus corruption no longer occurs (the UCM file simply never
-> defines the IV-sense PCM). The profile-cycle service was removed from the
-> repo; if you enabled it, disable it:
-> `systemctl --user disable --now fix-sdw-speakers.service` and delete it from
-> `~/.config/systemd/user/`.
+When PipeWire starts it probes every PCM on the card, including SmartAmp's
+IV-sense capture stream (`SDW1-PIN4-CAPTURE-SmartAmp`). That probe fails
+`Program transport params` with `-22` and leaves the SoundWire transport in a
+state where the second amp receives nothing, so the right speaker is silent
+while the left one works. The mixer looks correct throughout: both amps
+unmuted, postures 1 and 4 applied.
 
-SmartAmp's IV-sense capture stream (`SDW1-PIN4-CAPTURE-SmartAmp`) used to fail `Program transport params` during initial card activation, corrupting the entire SoundWire bus and blocking all audio until the card profile was cycled `off` -> `HiFi`.
+Cycling the card profile `off` -> `HiFi` reprograms the transport and both
+speakers come back. `config/fix-sdw-speakers.service` plus
+`config/tas2783-bus-reset` do that once per boot, after WirePlumber is up.
+Installed by [INSTALL.md](INSTALL.md) step 7.
 
 ### Device Map
 
@@ -267,9 +270,9 @@ Other SoundWire amp drivers (RT1318, CS35L56) handle this by implementing `set_t
 
 #### IV-sense capture stream corruption
 
-`SDW1-PIN4-CAPTURE-SmartAmp` fails `snd_soc_link_prepare()` with `-EINVAL` on every boot. This corrupts the SoundWire bus state, blocking all audio until the card profile is cycled. The UCM config intentionally omits PCM 3 (IV-sense) to avoid triggering this from the profile level, but the corruption occurs at the SoundWire transport layer during initial card activation regardless.
+`SDW1-PIN4-CAPTURE-SmartAmp` fails `snd_soc_link_prepare()` with `-EINVAL` on every boot, repeatedly, starting the moment PipeWire begins probing the card's PCMs. The UCM config omits PCM 3 (IV-sense) so nothing selects it as a device, but PipeWire's ACP layer probes every PCM the card exposes regardless, and the failures leave the SoundWire transport in a state where the second amp renders nothing.
 
-This is worked around by the profile-cycle systemd service (Step 4). The workaround becomes unnecessary once this is fixed upstream.
+This is worked around by the profile-cycle systemd service (Step 4), which reprograms the transport once per boot. The workaround becomes unnecessary once this is fixed upstream.
 
 #### SoundWire bus dies after suspend/resume
 

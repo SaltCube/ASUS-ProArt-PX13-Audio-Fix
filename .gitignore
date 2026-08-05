@@ -4,3 +4,16 @@
 *~
 temp/
 PX-13-audio-context-compact.txt
+
+# Kernel module build output: the install steps build in place, in src/tas2783/
+*.ko
+*.o
+*.mod
+*.mod.c
+*.cmd
+.*.cmd
+Module.symvers
+modules.order
+
+# Firmware extracted from the ASUS installer, redistribution not ours to make
+firmware/

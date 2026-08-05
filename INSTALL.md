@@ -19,6 +19,8 @@ diagnosis is in [docs/investigation-stereo-channel-fix.md](docs/investigation-st
 | Module sources | `/usr/local/src/tas2783/` | Source of truth for automatic rebuilds |
 | `tas2783-module-rebuild` | `/usr/local/bin/` | Rebuilds the module for every installed kernel |
 | `99-tas2783-module.hook` | `/etc/pacman.d/hooks/` | Runs the rebuild after each kernel or headers upgrade |
+| `tas2783-bus-reset` | `/usr/local/bin/` | Cycles the card profile once per boot to repair the SoundWire transport |
+| `fix-sdw-speakers.service` | `~/.config/systemd/user/` | Runs that reset after WirePlumber starts |
 
 Firmware is not installed by these steps: `linux-firmware` ships it now (see step 3).
 
@@ -143,7 +145,30 @@ You can run it by hand at any time:
 sudo /usr/local/bin/tas2783-module-rebuild
 ```
 
-## Step 7: Reboot
+## Step 7: Install the boot-time bus reset
+
+Without this step the right speaker is silent on every boot, even with
+everything above installed correctly.
+
+When PipeWire starts it probes every PCM on the card, including the SmartAmp
+IV-sense capture stream. That probe fails with `-22` and leaves the SoundWire
+transport in a state where the second amp receives nothing. Cycling the card
+profile reprograms it. The mixer gives no hint that anything is wrong: both amps
+read unmuted with postures 1 and 4 applied either way.
+
+```fish
+sudo install -Dm755 config/tas2783-bus-reset /usr/local/bin/tas2783-bus-reset
+install -Dm644 config/fix-sdw-speakers.service \
+  ~/.config/systemd/user/fix-sdw-speakers.service
+systemctl --user daemon-reload
+systemctl --user enable fix-sdw-speakers.service
+```
+
+The service is a user service because it drives `pactl`, which talks to your
+session's PipeWire. Run `/usr/local/bin/tas2783-bus-reset` by hand any time the
+right speaker goes quiet.
+
+## Step 8: Reboot
 
 ```fish
 reboot
@@ -153,7 +178,7 @@ A reboot is the simple, reliable way to load the patched module and re-run the
 UCM sequence. To avoid one, see
 [Appendix B](#appendix-b-swapping-the-module-without-rebooting).
 
-## Step 8: Verify
+## Step 9: Verify
 
 ```fish
 # 1. the patched module is the one loaded (path must contain updates/)
@@ -169,18 +194,32 @@ amixer -c amdsoundwire cget name='tas2783-2 DSP Posture Select'
 # 4. the amd_sdw card is on the HiFi profile, not pro-audio or off
 pactl list cards | grep -E 'Name: alsa_card|Active Profile'
 
-# 5. listen: "Front Left" must come from the left speaker only, then "Front Right"
+# 5. the bus reset ran this boot
+systemctl --user status fix-sdw-speakers.service
+
+# 6. listen: "Front Left" from the left speaker only, then "Front Right" from
+#    the right speaker only. This is the only check that catches a silent amp.
 speaker-test -D pipewire -c2 -t wav
 ```
 
-If step 3 shows `: values=1` for both amps, the UCM condition did not match and
-you are running the stock module: re-check steps 3 and 4, then reboot.
+The listening test matters because checks 1 to 4 pass whether or not the right
+speaker actually makes sound.
+
+- **Both amps read `values=1`**: the UCM condition did not match and you are
+  running the stock module. Re-check steps 3 and 4, then reboot.
+- **Postures read 1 and 4 but the right speaker is silent**: the boot-time bus
+  corruption. Run `/usr/local/bin/tas2783-bus-reset`; if that fixes it, step 7
+  is missing or its service did not run.
 
 ## Uninstall
 
 ```fish
+systemctl --user disable --now fix-sdw-speakers.service
+rm -f ~/.config/systemd/user/fix-sdw-speakers.service
+systemctl --user daemon-reload
 sudo rm -f /etc/pacman.d/hooks/99-tas2783-module.hook \
            /usr/local/bin/tas2783-module-rebuild \
+           /usr/local/bin/tas2783-bus-reset \
            /usr/share/alsa/ucm2/sof-soundwire/tas2783.conf \
            /usr/lib/modules/$(uname -r)/updates/snd-soc-tas2783-sdw.ko
 sudo rm -rf /usr/local/src/tas2783

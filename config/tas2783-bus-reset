@@ -1,0 +1,47 @@
+#!/bin/sh
+# Repair the SoundWire bus after boot.
+#
+# When PipeWire starts it probes every PCM on the card, including the SmartAmp
+# IV-sense capture stream (SDW1-PIN4-CAPTURE-SmartAmp). That probe fails with
+# -22 and leaves the bus transport params in a state where the second amp
+# receives nothing: the right speaker is silent while the left one works.
+# Cycling the card profile tears the streams down and reprograms them.
+#
+# Symptom without this: "speaker-test -D pipewire -c2 -t wav" plays Front Left
+# from the left speaker and Front Right from nowhere, even though the mixer
+# shows both amps unmuted with postures 1 and 4 applied.
+#
+# Run by fix-sdw-speakers.service after wireplumber; safe to run by hand.
+
+# Wait for the card to show up: this races PipeWire's own startup.
+card=""
+i=0
+while [ "$i" -lt 30 ]; do
+	card=$(pactl list short cards 2>/dev/null |
+	       grep -o 'alsa_card[^[:space:]]*amd_sdw' | head -1)
+	[ -n "$card" ] && break
+	i=$((i + 1))
+	sleep 1
+done
+
+if [ -z "$card" ]; then
+	echo "tas2783-bus-reset: no amd_sdw card found, nothing to do" >&2
+	exit 0
+fi
+
+# Let PipeWire finish probing before cycling, otherwise it races us and the
+# corruption can land after the reset instead of before it.
+sleep 3
+
+# Restore whatever profile is active rather than assuming a name: it has been
+# "HiFi" and "HiFi (Mic, Speaker)" across alsa-ucm-conf versions.
+profile=$(pactl list cards 2>/dev/null | awk -v want="$card" '
+	/Name: alsa_card/  { current = $2 }
+	/Active Profile:/  { if (current == want) { print $3; exit } }')
+[ -n "$profile" ] && [ "$profile" != "off" ] || profile="HiFi"
+
+pactl set-card-profile "$card" off || exit 0
+sleep 2
+pactl set-card-profile "$card" "$profile" || exit 0
+
+echo "tas2783-bus-reset: cycled $card through off -> $profile"
