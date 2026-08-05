@@ -5,8 +5,8 @@ this laptop and what was measured. Measurements and conclusions are kept in
 separate sections so the evidence stands on its own.
 
 Full working notes for the channel investigation are in
-[investigation-stereo-channel-fix.md](investigation-stereo-channel-fix.md), and
-the remaining kernel-side plan is in [step3-fix-plan.md](step3-fix-plan.md).
+[investigation-log.md](investigation-log.md), and
+the remaining kernel-side plan is in [kernel-fix-plan.md](kernel-fix-plan.md).
 
 ## Hardware
 
@@ -182,7 +182,7 @@ set them back to 1 and 4 without restoring audio.
 Observed on kernels 7.2.0-rc3 and 7.2.0-rc5. A systemd sleep hook that unloaded
 the SoundWire stack before s2idle was tried as a workaround and hung the machine
 (post-mortem in
-[investigation-stereo-channel-fix.md](investigation-stereo-channel-fix.md)).
+[investigation-log.md](investigation-log.md)).
 
 ### Conclusion
 

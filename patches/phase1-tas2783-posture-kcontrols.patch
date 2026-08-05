@@ -13,7 +13,7 @@ then render the same channel.
 These controls let userspace apply the postures; this repo's UCM file
 sets 1 and 4 in the Speaker EnableSequence. The proper fix is a
 function-type fallback in sound/soc/sdca/sdca_functions.c (see
-docs/step3-fix-plan.md, Phase 2).
+docs/kernel-fix-plan.md).
 
 Regenerate after changing src/tas2783/ by diffing against the matching
 stock kernel file with a/ b/ prefixes.

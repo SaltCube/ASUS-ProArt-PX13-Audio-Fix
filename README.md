@@ -283,7 +283,7 @@ speakers depending on your alsa-ucm-conf version.
 - **48 kHz / 16-bit playback only**, a limit of the AMD ACP70 SoundWire driver.
 - **The patched module is a stopgap.** The real fix belongs in
   `sound/soc/sdca/sdca_functions.c` so the firmware's own init tables get
-  applied (Phase 2 in [docs/step3-fix-plan.md](docs/step3-fix-plan.md)).
+  applied ([docs/kernel-fix-plan.md](docs/kernel-fix-plan.md)).
 
 ## Appendix A: Extracting firmware from the ASUS driver
 
