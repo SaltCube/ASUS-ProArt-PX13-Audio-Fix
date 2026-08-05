@@ -1,3 +1,23 @@
+ASoC: tas2783: expose DSP posture and UDMPU cluster as kcontrols
+
+Base: Linux v7.2-rc5, sound/soc/codecs/tas2783-sdw.c
+      (verified 2026-08-04: this is the only difference between that file
+      and src/tas2783/tas2783-sdw.c in this repo; tas2783.h is unmodified)
+
+On the ASUS ProArt PX13 (HN7306EAC) the ACPI firmware omits the SDCA
+function-type DisCo constant, so find_sdca_function() fails and the
+per-amp init tables, which set DSP posture 1 on one amp and 4 on the
+other for left/right channel selection, are never applied. Both amps
+then render the same channel.
+
+These controls let userspace apply the postures; this repo's UCM file
+sets 1 and 4 in the Speaker EnableSequence. The proper fix is a
+function-type fallback in sound/soc/sdca/sdca_functions.c (see
+docs/step3-fix-plan.md, Phase 2).
+
+Regenerate after changing src/tas2783/ by diffing against the matching
+stock kernel file with a/ b/ prefixes.
+
 --- a/sound/soc/codecs/tas2783-sdw.c
 +++ b/sound/soc/codecs/tas2783-sdw.c
 @@ -560,6 +560,19 @@

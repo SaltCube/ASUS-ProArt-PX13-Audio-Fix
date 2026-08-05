@@ -2,14 +2,11 @@
 #
 # Install the TAS2783 stereo fix for the ASUS ProArt PX13 (HN7306EAC).
 #
-# This automates INSTALL.md step for step; the numbered steps below match the
+# This automates README.md step for step; the numbered steps below match the
 # numbered steps in that document. Read it if you want to know why any of this
 # is needed, or if you would rather run the commands by hand.
 #
-# Usage:
-#   ./install.sh              install everything, then tell you to reboot
-#   ./install.sh --check      run the verification checks only, change nothing
-#   ./install.sh --uninstall  remove everything this script installs
+# Run ./install.sh --help for the options.
 #
 # Run as your normal user, not as root: step 5 installs a per-user WirePlumber
 # config, and sudo is called only for the steps that need it.
@@ -54,6 +51,31 @@ detect_card() {
     return 1
 }
 
+# The install/ tree mirrors where its files land: install/root/<path> installs
+# to /<path>, install/home/<path> to $HOME/<path>. That tree is the single
+# list of what this repo installs, read by both install and uninstall, and
+# file modes come from the repo files themselves (git tracks the executable
+# bit), so nothing here re-declares a destination or a mode.
+overlay_dest() {
+    case "$1" in
+        install/root/*) printf '/%s\n' "${1#install/root/}" ;;
+        install/home/*) printf '%s/%s\n' "$HOME" "${1#install/home/}" ;;
+        *) return 1 ;;
+    esac
+}
+
+overlay_install() {
+    local rel="$1" src dest mode
+    src="$REPO_DIR/$rel"
+    dest=$(overlay_dest "$rel") || die "not an overlay path: $rel"
+    mode=$(stat -c %a "$src")
+    case "$rel" in
+        install/root/*) sudo install -D -m "$mode" "$src" "$dest" ;;
+        *)              install -D -m "$mode" "$src" "$dest" ;;
+    esac
+    ok "installed to $dest"
+}
+
 # Step 0: prerequisites. Everything here is a hard requirement for the build,
 # so a failure stops the script before anything has been touched.
 step0_prerequisites() {
@@ -63,7 +85,7 @@ step0_prerequisites() {
     kmajor=${KVER%%.*}
     kminor=${KVER#*.}; kminor=${kminor%%.*}
     if [ "$kmajor" -lt 7 ] || { [ "$kmajor" -eq 7 ] && [ "$kminor" -lt 2 ]; }; then
-        die "kernel $KVER is too old, 7.2 or newer is required (see INSTALL.md step 0)"
+        die "kernel $KVER is too old, 7.2 or newer is required (see README.md step 0)"
     fi
     ok "kernel $KVER"
 
@@ -283,18 +305,14 @@ step3_module() {
 step4_ucm() {
     step "Step 4: installing the UCM config"
 
-    sudo install -Dm644 "$REPO_DIR/ucm2/sof-soundwire/tas2783.conf" \
-        /usr/share/alsa/ucm2/sof-soundwire/tas2783.conf
-    ok "installed to /usr/share/alsa/ucm2/sof-soundwire/tas2783.conf"
+    overlay_install install/root/usr/share/alsa/ucm2/sof-soundwire/tas2783.conf
 }
 
 # Step 5: per-user WirePlumber config. No sudo here on purpose.
 step5_wireplumber() {
     step "Step 5: installing the WirePlumber config"
 
-    install -Dm644 "$REPO_DIR/config/51-strix-halo-audio.conf" \
-        "$HOME/.config/wireplumber/wireplumber.conf.d/51-strix-halo-audio.conf"
-    ok "installed to ~/.config/wireplumber/wireplumber.conf.d/"
+    overlay_install install/home/.config/wireplumber/wireplumber.conf.d/51-strix-halo-audio.conf
 
     # A previously saved pro-audio profile would be restored on next boot and
     # would bypass UCM, so drop this card's saved state if there is any.
@@ -317,11 +335,8 @@ step6_hook() {
         "$REPO_DIR/src/tas2783/tas2783-sdw.c" \
         "$REPO_DIR/src/tas2783/tas2783.h" \
         "$REPO_DIR/src/tas2783/Makefile"
-    sudo install -Dm755 "$REPO_DIR/config/tas2783-module-rebuild" \
-        /usr/local/bin/tas2783-module-rebuild
-    sudo install -Dm644 "$REPO_DIR/config/99-tas2783-module.hook" \
-        /etc/pacman.d/hooks/99-tas2783-module.hook
-    ok "sources in $SRC_INSTALL_DIR, hook in /etc/pacman.d/hooks/"
+    overlay_install install/root/usr/local/bin/tas2783-module-rebuild
+    overlay_install install/root/etc/pacman.d/hooks/99-tas2783-module.hook
     info "The hook builds from $SRC_INSTALL_DIR, so this clone can be moved or deleted."
 }
 
@@ -331,11 +346,10 @@ step6_hook() {
 step7_bus_reset() {
     step "Step 7: installing the boot-time bus reset"
 
-    sudo install -Dm755 "$REPO_DIR/config/tas2783-bus-reset" /usr/local/bin/tas2783-bus-reset
+    overlay_install install/root/usr/local/bin/tas2783-bus-reset
     # A user service, not a system one: it drives pactl, which needs the
     # session's PipeWire.
-    install -Dm644 "$REPO_DIR/config/fix-sdw-speakers.service" \
-        "$HOME/.config/systemd/user/fix-sdw-speakers.service"
+    overlay_install install/home/.config/systemd/user/fix-sdw-speakers.service
     systemctl --user daemon-reload
     systemctl --user enable fix-sdw-speakers.service >/dev/null
     ok "fix-sdw-speakers.service enabled"
@@ -406,7 +420,7 @@ step8_verify() {
     fi
 
     if [ "$failed" -ne 0 ]; then
-        printf '\n%sSome checks failed.%s See INSTALL.md step 9.\n' "$BOLD$RED" "$RESET"
+        printf '\n%sSome checks failed.%s See README.md step 9.\n' "$BOLD$RED" "$RESET"
         return 1
     fi
 
@@ -494,7 +508,7 @@ listening_test() {
         printf '\n'
         warn "right speaker silent: the boot-time SoundWire bus corruption"
         if [ ! -x /usr/local/bin/tas2783-bus-reset ]; then
-            fail "/usr/local/bin/tas2783-bus-reset is not installed (INSTALL.md step 7)"
+            fail "/usr/local/bin/tas2783-bus-reset is not installed (README.md step 7)"
             return 1
         fi
 
@@ -512,7 +526,7 @@ listening_test() {
                 info "fix-sdw-speakers.service is enabled but did not do this at boot."
                 info "Check it with: systemctl --user status fix-sdw-speakers.service"
             else
-                info "Enable it so this happens automatically: INSTALL.md step 7."
+                info "Enable it so this happens automatically: README.md step 7."
             fi
             return 0
         fi
@@ -540,15 +554,22 @@ do_uninstall() {
     step "Uninstalling"
 
     systemctl --user disable --now fix-sdw-speakers.service >/dev/null 2>&1 || true
-    rm -f "$HOME/.config/systemd/user/fix-sdw-speakers.service"
-    systemctl --user daemon-reload
 
-    sudo rm -f /etc/pacman.d/hooks/99-tas2783-module.hook \
-               /usr/local/bin/tas2783-module-rebuild \
-               /usr/local/bin/tas2783-bus-reset \
-               /usr/share/alsa/ucm2/sof-soundwire/tas2783.conf
+    # The overlay tree is the list of what was installed, so walking it is the
+    # uninstall: no second list to keep in sync.
+    local f rel dest
+    while IFS= read -r f; do
+        rel=${f#"$REPO_DIR/"}
+        dest=$(overlay_dest "$rel") || continue
+        case "$rel" in
+            install/root/*) sudo rm -f "$dest" ;;
+            *)              rm -f "$dest" ;;
+        esac
+        ok "removed $dest"
+    done < <(find "$REPO_DIR/install" -type f | sort)
+
+    systemctl --user daemon-reload
     sudo rm -rf "$SRC_INSTALL_DIR"
-    rm -f "$HOME/.config/wireplumber/wireplumber.conf.d/51-strix-halo-audio.conf"
 
     # Every installed kernel may have a copy, not just the running one.
     local moddir kver
@@ -587,14 +608,14 @@ do_install() {
     step "Step 8: reboot"
     printf '\n%sInstall complete.%s Reboot, then verify with:\n' "$BOLD$GREEN" "$RESET"
     printf '    %s/install.sh --check\n' "$REPO_DIR"
-    printf '\nTo load the module without rebooting, see Appendix B in INSTALL.md.\n'
+    printf '\nTo load the module without rebooting, see Appendix B in README.md.\n'
 }
 
 usage() {
     cat <<'EOF'
 Install the TAS2783 stereo fix for the ASUS ProArt PX13 (HN7306EAC).
 
-This automates INSTALL.md step for step; the step numbers printed while it
+This automates README.md step for step; the step numbers printed while it
 runs match the step numbers in that document.
 
 Usage:

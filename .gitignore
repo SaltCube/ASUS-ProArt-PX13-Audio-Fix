@@ -19,3 +19,6 @@ modules.order
 # ours to make, and install.sh downloads the installer into the repo root.
 firmware/
 *.exe
+
+# Local machine dump, useful while working but not part of the fix
+specs.txt
