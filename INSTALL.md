@@ -257,7 +257,15 @@ Download `SmartAMP_TI_DCH_TexasInstruments_Z_V6.3.1.15_47519.exe` from the
 
 ```fish
 sudo pacman -S --needed icoutils 7zip
-chmod +x extract-firmware.sh
+./install.sh --firmware-exe SmartAMP_TI_DCH_TexasInstruments_Z_V6.3.1.15_47519.exe
+```
+
+That extracts the blobs and installs them under both names the driver tries,
+then continues with the rest of the install. It only does so when the blobs are
+actually missing, so the flag is harmless to pass on a machine that already has
+them. To extract without installing anything:
+
+```fish
 ./extract-firmware.sh SmartAMP_TI_DCH_TexasInstruments_Z_V6.3.1.15_47519.exe
 ```
 

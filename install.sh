@@ -21,6 +21,8 @@ KVER=$(uname -r)
 MODDIR="/usr/lib/modules/$KVER"
 MODULE=snd-soc-tas2783-sdw.ko
 SRC_INSTALL_DIR=/usr/local/src/tas2783
+SYSTEM_CONF="$REPO_DIR/systems/HN7306EAC.conf"
+FIRMWARE_EXE=""   # set by --firmware-exe, only used if the blobs are missing
 
 if [ -t 1 ]; then
     BOLD=$(tput bold); RED=$(tput setaf 1); GREEN=$(tput setaf 2)
@@ -100,20 +102,78 @@ step0_prerequisites() {
         die "run this script from inside the repo clone (src/tas2783 not found)"
 }
 
-# Step 2: firmware. Nothing to install on a current linux-firmware; this only
-# reports, because a missing blob does not stop the rest of the install.
+# Extract the blobs from the ASUS Windows installer and install them under both
+# names the driver tries. Only reached when linux-firmware does not ship them.
+extract_and_install_firmware() {
+    local exe="$1" name8 nameB
+
+    [ -f "$exe" ] || die "no such file: $exe"
+    [ -r "$SYSTEM_CONF" ] || die "missing $SYSTEM_CONF"
+
+    local tool
+    for tool in wrestool 7z; do
+        command -v "$tool" >/dev/null 2>&1 ||
+            die "$tool is needed to extract the firmware.
+    Install it with: sudo pacman -S --needed icoutils 7zip"
+    done
+
+    info "Extracting from $(basename "$exe")..."
+    # extract-firmware.sh verifies the SHA-256 of the installer and of both
+    # blobs, and writes them to ./firmware/ relative to the repo.
+    ( cd "$REPO_DIR" && ./extract-firmware.sh "$exe" >/dev/null ) ||
+        die "firmware extraction failed, run ./extract-firmware.sh directly to see why"
+
+    # Blob names come from the same per-system config the extractor uses, so
+    # they are defined in exactly one place.
+    # shellcheck source=/dev/null
+    . "$SYSTEM_CONF"
+    name8=${FIRMWARE_8_NAME/0x/}   # the kernel drops the 0x: 1714-1-0x8.bin -> 1714-1-8.bin
+    nameB=${FIRMWARE_B_NAME/0x/}
+
+    sudo install -Dm644 "$REPO_DIR/firmware/$FIRMWARE_8_NAME" "/lib/firmware/$name8"
+    sudo install -Dm644 "$REPO_DIR/firmware/$FIRMWARE_B_NAME" "/lib/firmware/$nameB"
+    sudo install -Dm644 "$REPO_DIR/firmware/$FIRMWARE_8_NAME" "/lib/firmware/ti/audio/tas2783/$name8"
+    sudo install -Dm644 "$REPO_DIR/firmware/$FIRMWARE_B_NAME" "/lib/firmware/ti/audio/tas2783/$nameB"
+    ok "firmware installed as $name8 and $nameB"
+}
+
+# Step 2: firmware. Normally nothing to do, since linux-firmware ships the
+# blobs. When it does not, they can only come from the ASUS Windows installer,
+# which cannot be downloaded automatically, so this asks for it rather than
+# pretending it can fetch it.
 step2_firmware() {
     step "Step 2: checking firmware"
 
     if [ -e /lib/firmware/1714-1-0x8.bin.zst ] && [ -e /lib/firmware/1714-1-0xB.bin.zst ]; then
         ok "firmware shipped by linux-firmware"
-    elif [ -e /lib/firmware/1714-1-8.bin ] && [ -e /lib/firmware/1714-1-B.bin ]; then
-        ok "firmware installed manually"
-    else
-        warn "TAS2783 firmware not found"
-        info "Update linux-firmware (sudo pacman -S linux-firmware), or extract the"
-        info "blobs from the ASUS driver: see Appendix A in INSTALL.md."
+        return 0
     fi
+    if [ -e /lib/firmware/1714-1-8.bin ] && [ -e /lib/firmware/1714-1-B.bin ]; then
+        ok "firmware installed manually"
+        return 0
+    fi
+
+    warn "TAS2783 firmware not found, the speakers will stay silent without it"
+
+    if [ -n "$FIRMWARE_EXE" ]; then
+        extract_and_install_firmware "$FIRMWARE_EXE"
+        return 0
+    fi
+
+    # Offer the obvious thing if the installer is sitting in the repo already.
+    local candidate
+    candidate=$(find "$REPO_DIR" -maxdepth 1 -iname 'SmartAMP*.exe' 2>/dev/null | head -1)
+    if [ -n "$candidate" ] && [ -t 0 ]; then
+        info "found $(basename "$candidate")"
+        if ask_yn "Extract the firmware from it now?"; then
+            extract_and_install_firmware "$candidate"
+            return 0
+        fi
+    fi
+
+    info "First try: sudo pacman -S linux-firmware   (20260622 or newer ships it)"
+    info "Otherwise download the ASUS SmartAMP driver (Appendix A in INSTALL.md)"
+    info "and re-run: ./install.sh --firmware-exe /path/to/SmartAMP...exe"
 }
 
 # Step 3: build the patched module and put it where depmod prefers it over the
@@ -267,6 +327,18 @@ step8_verify() {
 # test that catches a silent amp, and it needs ears.
 play_channel() {
     timeout 15 speaker-test -D pipewire -c2 -t wav -s "$1" -l 1 >/dev/null 2>&1 || true
+}
+
+ask_yn() {
+    local reply
+    while true; do
+        printf '    %s [y/n] ' "$1" >&2
+        read -r reply || return 1
+        case "$reply" in
+            [Yy]*) return 0 ;;
+            [Nn]*) return 1 ;;
+        esac
+    done
 }
 
 ask_speaker() {
@@ -432,22 +504,39 @@ Usage:
   ./install.sh --listen     the listening test on its own
   ./install.sh --uninstall  remove everything this script installs
 
+  --firmware-exe PATH       only needed if linux-firmware does not ship the
+                            blobs: extract them from the ASUS SmartAMP
+                            installer at PATH. Download it yourself first,
+                            see Appendix A in INSTALL.md.
+
 Run as your normal user, not as root: it installs a per-user WirePlumber
 config, and calls sudo only for the steps that need it.
 EOF
 }
 
 main() {
-    local rc=0
-    case "${1:-}" in
-        "")            ;;
-        --check)       step8_verify || rc=1
-                       listening_test || rc=1
-                       exit "$rc" ;;
-        --listen)      listening_test; exit $? ;;
-        --uninstall)   do_uninstall; exit 0 ;;
-        -h|--help)     usage; exit 0 ;;
-        *)             die "unknown option: $1 (try --help)" ;;
+    local rc=0 action=install
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --check)          action=check ;;
+            --listen)         action=listen ;;
+            --uninstall)      action=uninstall ;;
+            --firmware-exe)   shift
+                              [ $# -gt 0 ] || die "--firmware-exe needs a path"
+                              FIRMWARE_EXE="$1" ;;
+            --firmware-exe=*) FIRMWARE_EXE="${1#*=}" ;;
+            -h|--help)        usage; exit 0 ;;
+            *)                die "unknown option: $1 (try --help)" ;;
+        esac
+        shift
+    done
+
+    case "$action" in
+        check)     step8_verify || rc=1
+                   listening_test || rc=1
+                   exit "$rc" ;;
+        listen)    listening_test; exit $? ;;
+        uninstall) do_uninstall; exit 0 ;;
     esac
 
     [ "$(id -u)" -ne 0 ] ||
