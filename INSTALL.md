@@ -60,25 +60,21 @@ cd ASUS-ProArt-PX13-Audio-Fix
 
 ## Step 2: Check the firmware is present
 
-Since `linux-firmware` 20260622, the TAS2783 calibration blobs for this laptop
-ship in the `linux-firmware-other` package (a dependency of `linux-firmware`),
-byte for byte identical to the ones inside the ASUS Windows driver. The driver
-requests `1714-1-0x8.bin` / `1714-1-0xB.bin` and the kernel transparently
-decompresses `.zst`, so these symlinks are all that is needed:
+On `linux-firmware` 20260622 or newer the blobs are already installed and the
+kernel loads them automatically. Check:
 
 ```fish
-ls -l /lib/firmware/1714-1-0x8.bin.zst /lib/firmware/1714-1-0xB.bin.zst
+ls /lib/firmware/1714-1-0x8.bin.zst /lib/firmware/1714-1-0xB.bin.zst
 ```
 
-If both exist, this step is done. If they do not (older `linux-firmware`), update
-it first:
+If both exist, this step is done. If not, update linux-firmware:
 
 ```fish
 sudo pacman -S linux-firmware
 ```
 
-Only if your distro still does not ship them, fall back to extracting the blobs
-from the ASUS Windows driver: see
+If your distro still does not ship them, extract them from the ASUS Windows
+driver instead: see
 [Appendix A](#appendix-a-extracting-firmware-from-the-asus-driver).
 
 ## Step 3: Build and install the patched module

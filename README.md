@@ -66,20 +66,18 @@ Look for *TI Smart Amplifier Driver for Speakers* under that. The file used in t
   `acp-pdm-mach` device appears, not the SoundWire card.
 - Full prerequisite list and install steps: [INSTALL.md](INSTALL.md).
 
-### Step 1 (OBSOLETE since linux-firmware 20260622)
+### Step 1: Firmware
 
-> **This step is no longer needed.** `linux-firmware-other` (pulled in by
-> `linux-firmware`) now ships the blobs for this laptop as
-> `/lib/firmware/1714-1-0x8.bin.zst` and `1714-1-0xB.bin.zst`, symlinked from
-> `ti/audio/tas2783/`. Verified 2026-08-04: they are **byte for byte identical**
-> to the ones extracted from the ASUS installer below, and the 7.2 driver asks
-> for exactly those names (`tas_generate_fw_name()` builds
-> `%04X-%1X-0x%1X.bin` from the PCI subsystem ID, falling back to the
-> no-`0x` name only if that fails). The kernel decompresses `.zst` firmware
-> itself, so nothing needs installing. The manual extraction below is kept as a
-> fallback for distros with older linux-firmware.
+**On `linux-firmware` 20260622 or newer, skip this step.** The blobs ship in the
+`linux-firmware-other` package (byte for byte identical to the ones below) and
+the kernel loads them automatically. Check with:
 
-The firmware must be extracted from the ASUS Windows driver, download link above.
+```fish
+ls /lib/firmware/1714-1-0x8.bin.zst /lib/firmware/1714-1-0xB.bin.zst
+```
+
+If both exist, go to [Step 3](#step-3). Otherwise extract them from the ASUS
+Windows driver, download link above.
 
 The ASUS Windows driver (`SmartAMP_TI_DCH_TexasInstruments_Z_V6.3.1.15_47519.exe`, 4.3 MB) is a nested installer.
 
