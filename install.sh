@@ -371,8 +371,78 @@ step7_bus_reset() {
     ok "fix-sdw-speakers.service enabled"
 }
 
+# Step 8: load the patched module on the running system. depmod already
+# prefers it, but the stock module is loaded and PipeWire holds the card open,
+# so the stack comes down first. Best effort: on failure the module is still
+# installed and the next boot loads it.
+step8_reload() {
+    step "Step 8: reloading the audio modules"
+
+    local units=(wireplumber.service pipewire.service pipewire.socket
+                 pipewire-pulse.service pipewire-pulse.socket)
+
+    if ! systemctl --user show-environment >/dev/null 2>&1; then
+        warn "no systemd user session, cannot stop PipeWire"
+        return 1
+    fi
+
+    # Twice: the first stop trips socket activation and pipewire comes back.
+    info "Stopping PipeWire..."
+    systemctl --user stop "${units[@]}" >/dev/null 2>&1 || true
+    systemctl --user stop "${units[@]}" >/dev/null 2>&1 || true
+
+    info "Reloading snd_soc_tas2783_sdw..."
+    local rc=0
+    if sudo modprobe -r snd_acp_sdw_legacy_mach snd_soc_tas2783_sdw 2>/dev/null; then
+        sudo modprobe snd_soc_tas2783_sdw && sudo modprobe snd_acp_sdw_legacy_mach || rc=1
+    else
+        rc=1
+    fi
+
+    # Unconditional: a failed swap must not leave PipeWire stopped.
+    systemctl --user start pipewire.socket pipewire-pulse.socket wireplumber.service \
+        >/dev/null 2>&1 || true
+
+    if [ "$rc" -ne 0 ]; then
+        warn "modules are in use, reload failed"
+        return 1
+    fi
+
+    # The card and the UCM sequence come back a second or two after the modules
+    # do. The posture kcontrols exist only in the patched module.
+    local card i=0
+    info "Waiting for the card..."
+    while [ "$i" -lt 15 ]; do
+        if card=$(detect_card) &&
+           amixer -c "$card" scontrols 2>/dev/null | grep -q 'DSP Posture Select'; then
+            ok "patched module loaded"
+            return 0
+        fi
+        i=$((i + 1))
+        sleep 1
+    done
+
+    warn "card did not return with the patched module"
+    return 1
+}
+
+# DEFAULT is what a bare Enter means. Returns 0 if the machine is going down.
+offer_reboot() {
+    local default="$1"
+
+    # Never reboot a non-interactive run.
+    [ -t 0 ] || return 1
+
+    printf '\n'
+    ask_yn "Reboot now?" "$default" || return 1
+
+    info "Run '$REPO_DIR/install.sh --check' after rebooting to verify."
+    info "Rebooting..."
+    sudo systemctl reboot
+}
+
 # Step 9: verification. Also the whole of --check.
-step8_verify() {
+step9_verify() {
     step "Step 9: verifying"
 
     local failed=0 card modpath controls p1 p2
@@ -452,11 +522,20 @@ play_channel() {
     timeout 15 speaker-test -D pipewire -c2 -t wav -s "$1" -l 1 >/dev/null 2>&1 || true
 }
 
+# ask_yn PROMPT [DEFAULT]
+# DEFAULT is y or n, taken on a bare Enter and shown as the capital in the
+# hint. Without it an answer is required.
 ask_yn() {
-    local reply
+    local prompt="$1" default="${2:-}" hint reply
+    case "$default" in
+        y) hint="[Y/n]" ;;
+        n) hint="[y/N]" ;;
+        *) hint="[y/n]" ;;
+    esac
     while true; do
-        printf '    %s [y/n] ' "$1" >&2
+        printf '    %s %s ' "$prompt" "$hint" >&2
         read -r reply || return 1
+        [ -n "$reply" ] || reply="$default"
         case "$reply" in
             [Yy]*) return 0 ;;
             [Nn]*) return 1 ;;
@@ -568,6 +647,17 @@ listening_test() {
     return 1
 }
 
+# The whole of --check: automated checks, then the listening test. Also run at
+# the end of an install when the reboot is declined.
+run_check() {
+    local rc=0
+
+    step9_verify || rc=1
+    listening_test || rc=1
+
+    return "$rc"
+}
+
 do_uninstall() {
     step "Uninstalling"
 
@@ -623,10 +713,29 @@ do_install() {
     step6_hook
     step7_bus_reset
 
-    step "Step 8: reboot"
-    printf '\n%sInstall complete.%s Reboot, then verify with:\n' "$BOLD$GREEN" "$RESET"
-    printf '    %s/install.sh --check\n' "$REPO_DIR"
-    printf '\nTo load the module without rebooting, see Appendix B in README.md.\n'
+    # Reload failed: the stock module is still loaded, so a check here would
+    # only report the install as broken.
+    if ! step8_reload; then
+        printf '\n%sInstall complete.%s A reboot is required to load the module.\n' \
+            "$BOLD$GREEN" "$RESET"
+        offer_reboot y && return 0
+        info "Reboot when convenient, then run '$REPO_DIR/install.sh --check'."
+        return 0
+    fi
+
+    # Suggested, not required: a reboot is what proves the fix persists.
+    printf '\n%sInstall complete.%s A reboot is recommended.\n' "$BOLD$GREEN" "$RESET"
+    offer_reboot n && return 0
+
+    # Reboot declined: verify now.
+    local rc=0
+    run_check || rc=1
+    if [ "$rc" -ne 0 ]; then
+        printf '\n'
+        info "Reboot and run '$REPO_DIR/install.sh --check' again."
+    fi
+
+    return "$rc"
 }
 
 usage() {
@@ -637,7 +746,7 @@ This automates README.md step for step; the step numbers printed while it
 runs match the step numbers in that document.
 
 Usage:
-  ./install.sh              install everything, then tell you to reboot
+  ./install.sh              install everything, load it, and verify it
   ./install.sh --check      verify the install, then play test tones and ask
                             which speaker you heard, repairing the bus if the
                             right one is silent
@@ -684,8 +793,7 @@ main() {
     done
 
     case "$action" in
-        check)     step8_verify || rc=1
-                   listening_test || rc=1
+        check)     run_check || rc=1
                    exit "$rc" ;;
         listen)    listening_test; exit $? ;;
         uninstall) do_uninstall; exit 0 ;;

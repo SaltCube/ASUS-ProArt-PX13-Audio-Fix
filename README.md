@@ -16,7 +16,6 @@ is broken and why is in [docs/analysis.md](docs/analysis.md).
 git clone https://github.com/SaltCube/ASUS-ProArt-PX13-Audio-Fix.git
 cd ASUS-ProArt-PX13-Audio-Fix
 ./install.sh
-reboot
 ./install.sh --check
 ```
 
